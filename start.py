@@ -26,6 +26,7 @@ def main():
         sys.argv = ['main.py', '--mode', 'api', '--port', port]
         
         print(f"🌐 Starting server on port {port}")
+        print(f"🔗 Health check will be available at: http://0.0.0.0:{port}/")
         run_main()
         
     except ImportError as e:
@@ -38,11 +39,22 @@ def main():
         # Try again
         from main import main as run_main
         sys.argv = ['main.py', '--mode', 'api', '--port', port]
+        print(f"🌐 Starting server on port {port}")
         run_main()
         
     except Exception as e:
         print(f"❌ Error starting application: {e}")
-        sys.exit(1)
+        print("🔄 Trying alternative startup...")
+        
+        # Fallback: try direct uvicorn
+        try:
+            import uvicorn
+            from api_server import app
+            print(f"🌐 Starting with uvicorn on port {port}")
+            uvicorn.run(app, host="0.0.0.0", port=int(port))
+        except Exception as e2:
+            print(f"❌ Fallback also failed: {e2}")
+            sys.exit(1)
 
 if __name__ == "__main__":
     main()
