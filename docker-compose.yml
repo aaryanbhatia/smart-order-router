@@ -1,0 +1,68 @@
+version: '3.8'
+
+services:
+  sor-app:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://sor_user:sor_password@db:5432/sor_db
+      - REDIS_URL=redis://redis:6379/0
+      - LOG_LEVEL=INFO
+    env_file:
+      - .env
+    depends_on:
+      - db
+      - redis
+    volumes:
+      - ./logs:/app/logs
+    restart: unless-stopped
+    networks:
+      - sor-network
+
+  db:
+    image: postgres:15-alpine
+    environment:
+      - POSTGRES_DB=sor_db
+      - POSTGRES_USER=sor_user
+      - POSTGRES_PASSWORD=sor_password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    networks:
+      - sor-network
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    restart: unless-stopped
+    networks:
+      - sor-network
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf
+      - ./ssl:/etc/nginx/ssl
+    depends_on:
+      - sor-app
+    restart: unless-stopped
+    networks:
+      - sor-network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  sor-network:
+    driver: bridge
