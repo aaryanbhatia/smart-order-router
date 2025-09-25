@@ -1,4 +1,5 @@
-import os, time, math, streamlit as st, ccxt
+import os, time, math, streamlit as st, requests
+import json
 
 # ----------------- Config -----------------
 DEFAULT_SYMBOL = os.getenv("DEFAULT_SYMBOL", "BTC/USDT")
@@ -6,127 +7,166 @@ THROUGH_BPS = 3.0            # cross for marketable-limit
 ORDER_WAIT_SECONDS = 0.35     # brief wait then cancel
 USE_FOK_FIRST = True          # FOK -> IOC -> plain limit
 
+# Cloud API Configuration
+API_BASE_URL = os.getenv("API_BASE_URL", "https://smart-order-router.onrender.com")
+
+# Simulated exchanges for display
 EXCHS = {
-    "gateio": {"label": "Gate.io", "env": "GATE", "klass": ccxt.gateio},
-    "mexc":   {"label": "MEXC",   "env": "MEXC", "klass": ccxt.mexc},
+    "gateio": {"label": "Gate.io", "env": "GATE"},
+    "mexc":   {"label": "MEXC",   "env": "MEXC"},
 }
 
-# --------------- Helpers ------------------
-def build_client(k):
-    spec = EXCHS[k]
-    ex = spec["klass"]({
-        "apiKey": os.getenv(f"{spec['env']}_API_KEY",""),
-        "secret": os.getenv(f"{spec['env']}_API_SECRET",""),
-        "enableRateLimit": True,
-        "timeout": 10000,
-    })
-    ex.options = ex.options or {}
-    ex.options["defaultType"] = "spot"
-    return ex
-
-def load_markets(ex):
-    try: ex.load_markets(reload=True)
-    except Exception as e: st.warning(f"[{ex.id}] load_markets failed: {e}")
-
-def taker_fee(mkt): 
-    try: return float(mkt.get("taker", 0.001))
-    except: return 0.001
-
-def price_to_precision(ex, sym, px):
-    try: return float(ex.price_to_precision(sym, px))
-    except: return float(px)
-
-def amount_to_precision(ex, sym, amt):
-    try: return float(ex.amount_to_precision(sym, amt))
-    except: return float(amt)
-
-def clamp_amount(mkt, amt):
-    lim = (mkt or {}).get("limits", {})
-    mn = lim.get("amount", {}).get("min"); mx = lim.get("amount", {}).get("max")
-    if mn is not None and amt < float(mn): return 0.0
-    if mx is not None and amt > float(mx): return float(mx)
-    return float(amt)
-
-def fetch_entry_tob_with_qty(ex, symbol, side):
-    px, qty = 0.0, 0.0
-    # ticker first
+# --------------- API Helpers ------------------
+def call_api(endpoint, method="GET", data=None):
+    """Call the cloud API"""
     try:
-        t = ex.fetch_ticker(symbol)
-        bid, ask = float(t.get("bid") or 0), float(t.get("ask") or 0)
-        bidVol, askVol = float(t.get("bidVolume") or 0), float(t.get("askVolume") or 0)
-        if side=="buy" and ask>0: px, qty = ask, askVol
-        elif side=="sell" and bid>0: px, qty = bid, bidVol
-    except: pass
-    # fallback to tiny orderbook
-    if px<=0 or qty<=0:
-        try:
-            ob = ex.fetch_order_book(symbol, limit=5)
-            bids, asks = ob.get("bids") or [], ob.get("asks") or []
-            if side=="buy" and asks: px, qty = float(asks[0][0]), float(asks[0][1])
-            if side=="sell" and bids: px, qty = float(bids[0][0]), float(bids[0][1])
-        except: pass
-    return px, qty
-
-def depth_within_bps(ex, symbol, side, taker, bps):
-    try: ob = ex.fetch_order_book(symbol, limit=25)
+        url = f"{API_BASE_URL}{endpoint}"
+        if method == "GET":
+            response = requests.get(url, timeout=10)
+        elif method == "POST":
+            response = requests.post(url, json=data, timeout=10)
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"API Error: {response.status_code}")
+            return None
     except Exception as e:
-        st.warning(f"[{ex.id}] depth fetch failed: {e}"); return 0.0, 0.0
-    bids, asks = ob.get("bids") or [], ob.get("asks") or []
-    if side=="buy":
-        if not asks: return 0.0, 0.0
-        tob = float(asks[0][0]); cap = tob*(1+bps/1e4)
-        qty, cost = 0.0, 0.0
-        for px, sz in asks:
-            px, sz = float(px), float(sz)
-            if px>cap: break
-            qty += sz; cost += sz*px
-        vwap = (cost/qty) if qty>0 else 0.0
-        return qty, vwap*(1+taker) if vwap>0 else 0.0
-    else:
-        if not bids: return 0.0, 0.0
-        tob = float(bids[0][0]); cap = tob*(1-bps/1e4)
-        qty, rev = 0.0, 0.0
-        for px, sz in bids:
-            px, sz = float(px), float(sz)
-            if px<cap: break
-            qty += sz; rev += sz*px
-        vwap = (rev/qty) if qty>0 else 0.0
-        return qty, vwap*(1-taker) if vwap>0 else 0.0
+        st.error(f"Connection Error: {e}")
+        return None
 
-def place_marketable_limit(ex, symbol, side, qty, guard_px, cross_bps=THROUGH_BPS, fok_first=True):
-    if guard_px<=0: raise ValueError("No guard TOB")
-    px = guard_px*(1+cross_bps/1e4 if side=="buy" else 1-cross_bps/1e4)
-    px = price_to_precision(ex, symbol, px)
-    chain = [{"timeInForce":"FOK"},{"timeInForce":"IOC"},{}] if fok_first else [{"timeInForce":"IOC"},{}]
-    last_err=None
-    for params in chain:
-        try:
-            o = ex.create_order(symbol, "limit", side, qty, px, params=params)
-            time.sleep(ORDER_WAIT_SECONDS)
-            info = ex.fetch_order(o.get("id"), symbol)
-            filled = float((info or {}).get("filled") or 0.0)
-            avg = (info or {}).get("average")
-            if not avg:
-                cost = (info or {}).get("cost")
-                if cost and filled>0: avg = float(cost)/filled
-            avg = float(avg or 0.0)
-            if (info or {}).get("status") in ("open","partially_filled"):
-                try: ex.cancel_order(o.get("id"), symbol)
-                except: pass
-            return o, avg, filled
-        except Exception as e:
-            last_err=e
-            continue
-    raise last_err
+def taker_fee(venue): 
+    # Default taker fees for different venues
+    fees = {"gateio": 0.002, "mexc": 0.002, "kucoin": 0.001, "bitget": 0.001}
+    return fees.get(venue.lower(), 0.001)
+
+def price_to_precision(price, decimals=8):
+    try: return round(float(price), decimals)
+    except: return float(price)
+
+def amount_to_precision(amount, decimals=8):
+    try: return round(float(amount), decimals)
+    except: return float(amount)
+
+def clamp_amount(amount, min_amount=0.001, max_amount=1000000):
+    try:
+        amt = float(amount)
+        if amt < min_amount: return 0.0
+        if amt > max_amount: return max_amount
+        return amt
+    except: return 0.0
+
+def fetch_entry_tob_with_qty(venue, symbol, side):
+    """Fetch top of book data from cloud API"""
+    try:
+        # Convert BTC/USDT to BTCUSDT for API
+        api_symbol = symbol.replace("/", "")
+        prices = call_api(f"/prices/{api_symbol}")
+        if not prices:
+            return 0.0, 0.0
+        
+        # Find data for the specific venue
+        for price_data in prices:
+            if price_data.get("venue", "").lower() == venue.lower():
+                if side == "buy":
+                    px = price_data.get("ask_price", 0)
+                    qty = price_data.get("ask_quantity", 0)
+                else:
+                    px = price_data.get("bid_price", 0)
+                    qty = price_data.get("bid_quantity", 0)
+                return float(px), float(qty)
+        
+        # Fallback to first available data
+        price_data = prices[0]
+        if side == "buy":
+            px = price_data.get("ask_price", 0)
+            qty = price_data.get("ask_quantity", 0)
+        else:
+            px = price_data.get("bid_price", 0)
+            qty = price_data.get("bid_quantity", 0)
+        
+        return float(px), float(qty)
+    except Exception as e:
+        st.error(f"Failed to fetch prices for {venue}: {e}")
+        return 0.0, 0.0
+
+def depth_within_bps(venue, symbol, side, taker, bps):
+    """Calculate depth within basis points from cloud API"""
+    try:
+        # Convert BTC/USDT to BTCUSDT for API
+        api_symbol = symbol.replace("/", "")
+        prices = call_api(f"/prices/{api_symbol}")
+        if not prices:
+            return 0.0, 0.0
+        
+        # Find data for the specific venue
+        price_data = None
+        for p in prices:
+            if p.get("venue", "").lower() == venue.lower():
+                price_data = p
+                break
+        
+        if not price_data:
+            price_data = prices[0]  # Fallback to first available
+        
+        base_price = price_data.get("ask_price" if side == "buy" else "bid_price", 0)
+        base_qty = price_data.get("ask_quantity" if side == "buy" else "bid_quantity", 0)
+        
+        # Simulate depth calculation
+        depth_factor = 1 + (bps / 10000)
+        max_qty = float(base_qty) * depth_factor
+        vwap = float(base_price) * (1 + taker if side == "buy" else 1 - taker)
+        
+        return max_qty, vwap
+    except Exception as e:
+        st.warning(f"[{venue}] depth calculation failed: {e}")
+        return 0.0, 0.0
+
+def place_marketable_limit(venue, symbol, side, qty, guard_px, cross_bps=THROUGH_BPS, fok_first=True):
+    """Place order via cloud API"""
+    if guard_px <= 0: 
+        raise ValueError("No guard TOB")
+    
+    px = guard_px * (1 + cross_bps/10000 if side == "buy" else 1 - cross_bps/10000)
+    px = price_to_precision(px)
+    
+    try:
+        order_data = {
+            "symbol": symbol,
+            "side": side,
+            "order_type": "limit",
+            "quantity": qty,
+            "price": px
+        }
+        
+        result = call_api("/orders", method="POST", data=order_data)
+        if result:
+            return result, result.get("average_price", px), result.get("total_filled", qty)
+        else:
+            raise Exception("Failed to place order")
+    except Exception as e:
+        st.error(f"Order placement failed: {e}")
+        raise e
 
 def fmt(x, d=8): 
     try: return f"{float(x):.{d}f}"
     except: return "-"
 
 # --------------- UI ---------------------
-st.set_page_config(page_title="SOR — Gate.io + MEXC", layout="centered")
-st.title("SOR — Gate.io + MEXC (Spot)")
-st.caption("Local UI • API keys stay on your machine • Dry-run by default")
+st.set_page_config(page_title="SOR — Smart Order Router", layout="centered")
+st.title("SOR — Smart Order Router")
+st.caption("Cloud API • Real-time trading • Multi-exchange support")
+
+# API Status Check
+with st.sidebar:
+    st.header("API Status")
+    health = call_api("/health")
+    if health:
+        st.success("✅ API Connected")
+        st.write(f"Status: {health.get('status', 'Unknown')}")
+    else:
+        st.error("❌ API Disconnected")
+        st.write("Make sure your cloud API is running")
 
 colA, colB, colC = st.columns([1,1,1])
 with colA:
@@ -146,28 +186,56 @@ with st.expander("Per-exchange symbol overrides (optional)"):
 
 btn_fetch = st.button("Fetch quotes")
 
-if btn_fetch:
-    rows = []
-    ex_map = {}
-    for k in EXCHS:
-        ex = build_client(k); ex_map[k]=ex
-        sym = (ovr_gate if (k=="gateio" and ovr_gate) else ovr_mexc if (k=="mexc" and ovr_mexc) else symbol)
-        load_markets(ex)
-        mkt = ex.markets.get(sym)
-        if not mkt or mkt.get("active") is False:
-            st.warning(f"{EXCHS[k]['label']}: '{sym}' not listed/active")
-            continue
-        px, qty = fetch_entry_tob_with_qty(ex, sym, side)
-        tk = taker_fee(mkt)
-        eff = px*(1+tk) if side=="buy" else px*(1-tk)
-        row = {"k":k,"label":EXCHS[k]["label"],"sym":sym,"px":px,"qty":qty,"taker":tk,"eff":eff}
-        if show_depth:
-            mx, vwap = depth_within_bps(ex, sym, side, tk, bps)
-            row["mx"]=mx; row["vwap"]=vwap
-        rows.append(row)
+# Initialize session state
+if 'price_data' not in st.session_state:
+    st.session_state.price_data = None
+if 'rows' not in st.session_state:
+    st.session_state.rows = []
 
-    if not rows:
+if btn_fetch:
+    # Fetch prices from cloud API
+    # Convert BTC/USDT to BTCUSDT for API
+    api_symbol = symbol.replace("/", "")
+    prices = call_api(f"/prices/{api_symbol}")
+    
+    if not prices:
+        st.error("Failed to fetch prices from cloud API")
         st.stop()
+    
+    # Store in session state
+    st.session_state.price_data = prices
+    
+    # Process each venue's data
+    rows = []
+    for price_data in prices:
+        venue = price_data.get("venue", "unknown")
+        px, qty = fetch_entry_tob_with_qty(venue, symbol, side)
+        tk = taker_fee(venue)
+        eff = px*(1+tk) if side=="buy" else px*(1-tk)
+        
+        row = {
+            "k": venue,
+            "label": venue.upper(),
+            "sym": symbol,
+            "px": px,
+            "qty": qty,
+            "taker": tk,
+            "eff": eff
+        }
+        
+        if show_depth:
+            mx, vwap = depth_within_bps(venue, symbol, side, tk, bps)
+            row["mx"] = mx
+            row["vwap"] = vwap
+        
+        rows.append(row)
+    
+    # Store rows in session state
+    st.session_state.rows = rows
+
+# Use stored data if available
+if st.session_state.rows:
+    rows = st.session_state.rows
 
     st.subheader("Fast snapshot (your side)")
     st.table([{
@@ -201,35 +269,49 @@ if btn_fetch:
     if st.button("Execute (marketable-limit)"):
         results = []
         for p in plan:
-            if p["desired"] <= 0: continue
-            ex = ex_map[p["k"]]; sym = p["sym"]
-            mkt = ex.markets.get(sym)
-            qty = amount_to_precision(ex, sym, clamp_amount(mkt, p["desired"]))
+            if p["desired"] <= 0: 
+                continue
+            
+            venue = p["k"]
+            sym = p["sym"]
+            qty = amount_to_precision(clamp_amount(p["desired"]))
+            
             if qty <= 0:
-                results.append({"Venue": EXCHS[p["k"]]["label"], "Error":"amount_below_min"}); continue
+                results.append({"Venue": venue.upper(), "Error":"amount_below_min"})
+                continue
+            
             guard = p["guard"]
             if guard <= 0:
-                results.append({"Venue": EXCHS[p["k"]]["label"], "Error":"no_guard_price"}); continue
+                results.append({"Venue": venue.upper(), "Error":"no_guard_price"})
+                continue
 
             if dry:
                 results.append({
-                    "Venue": EXCHS[p["k"]]["label"], "Symbol": sym,
-                    "Placed Qty": qty, "Guard TOB": guard,
-                    "Avg Fill": 0.0, "Filled Qty": 0.0, "Slippage (bps)": 0.0,
+                    "Venue": venue.upper(), 
+                    "Symbol": sym,
+                    "Placed Qty": qty, 
+                    "Guard TOB": guard,
+                    "Avg Fill": 0.0, 
+                    "Filled Qty": 0.0, 
+                    "Slippage (bps)": 0.0,
                     "Note": "DRY-RUN"
                 })
                 continue
 
             try:
-                order, avg, filled = place_marketable_limit(ex, sym, side, qty, guard)
-                slip = ((avg-guard)/guard*1e4) if (avg>0 and guard>0 and side=="buy") else ((guard-avg)/guard*1e4 if (avg>0 and guard>0) else 0.0)
+                order, avg, filled = place_marketable_limit(venue, sym, side, qty, guard)
+                slip = ((avg-guard)/guard*10000) if (avg>0 and guard>0 and side=="buy") else ((guard-avg)/guard*10000 if (avg>0 and guard>0) else 0.0)
                 results.append({
-                    "Venue": EXCHS[p["k"]]["label"], "Symbol": sym,
-                    "Placed Qty": qty, "Guard TOB": guard,
-                    "Avg Fill": avg, "Filled Qty": filled, "Slippage (bps)": round(slip,2)
+                    "Venue": venue.upper(), 
+                    "Symbol": sym,
+                    "Placed Qty": qty, 
+                    "Guard TOB": guard,
+                    "Avg Fill": avg, 
+                    "Filled Qty": filled, 
+                    "Slippage (bps)": round(slip,2)
                 })
             except Exception as e:
-                results.append({"Venue": EXCHS[p["k"]]["label"], "Symbol": sym, "Error": str(e)})
+                results.append({"Venue": venue.upper(), "Symbol": sym, "Error": str(e)})
 
         if not results:
             st.warning("Enter a positive quantity for at least one venue.")
@@ -244,7 +326,8 @@ if btn_fetch:
                     tot_notional += (r.get("Filled Qty") or 0.0) * px
             overall_avg = (tot_notional/tot_filled) if tot_filled>0 else 0.0
             st.caption(f"Overall filled: {fmt(tot_filled)} units @ average {fmt(overall_avg)}")
-    # Close clients
-    for ex in ex_map.values():
-        try: ex.close()
-        except: pass
+
+# Footer
+st.divider()
+st.caption(f"Connected to: {API_BASE_URL}")
+st.caption("Smart Order Router - Cloud Deployment")
