@@ -33,23 +33,23 @@ class SmartOrderRouter:
             if hasattr(config, 'exchanges') and 'gateio' in config.exchanges:
                 gateio_config = config.exchanges['gateio']
                 self.exchanges['gateio'] = ccxt.gateio({
-                    'apiKey': gateio_config.get('api_key', ''),
-                    'secret': gateio_config.get('secret', ''),
-                    'sandbox': gateio_config.get('sandbox', True),
+                    'apiKey': gateio_config.api_key or '',
+                    'secret': gateio_config.secret or '',
+                    'sandbox': gateio_config.sandbox,
                     'enableRateLimit': True,
                 })
-                logger.info("Gate.io exchange initialized")
+                logger.info(f"Gate.io exchange initialized with API key: {gateio_config.api_key[:8] if gateio_config.api_key else 'None'}...")
             
             # MEXC
             if hasattr(config, 'exchanges') and 'mexc' in config.exchanges:
                 mexc_config = config.exchanges['mexc']
                 self.exchanges['mexc'] = ccxt.mexc({
-                    'apiKey': mexc_config.get('api_key', ''),
-                    'secret': mexc_config.get('secret', ''),
-                    'sandbox': mexc_config.get('sandbox', True),
+                    'apiKey': mexc_config.api_key or '',
+                    'secret': mexc_config.secret or '',
+                    'sandbox': mexc_config.sandbox,
                     'enableRateLimit': True,
                 })
-                logger.info("MEXC exchange initialized")
+                logger.info(f"MEXC exchange initialized with API key: {mexc_config.api_key[:8] if mexc_config.api_key else 'None'}...")
                 
         except Exception as e:
             logger.warning(f"Failed to initialize exchanges: {e}")
