@@ -19,15 +19,32 @@ def main():
     
     # Start the application
     try:
-        # Import and run the main application
-        from main import main as run_main
+        # Try direct uvicorn approach first (more reliable)
+        import uvicorn
+        from api_server import app
+        print(f"🌐 Starting with uvicorn on port {port}")
+        uvicorn.run(app, host="0.0.0.0", port=int(port))
         
-        # Override sys.argv to pass the correct arguments
-        sys.argv = ['main.py', '--mode', 'api', '--port', port]
+    except ImportError as e:
+        print(f"❌ Import error: {e}")
+        print("📦 Installing dependencies...")
         
-        print(f"🌐 Starting server on port {port}")
-        print(f"🔗 Health check will be available at: http://0.0.0.0:{port}/")
-        run_main()
+        # Try to install dependencies
+        subprocess.run([sys.executable, '-m', 'pip', 'install', '-r', 'requirements.txt'])
+        
+        # Try again with uvicorn
+        try:
+            import uvicorn
+            from api_server import app
+            print(f"🌐 Starting with uvicorn on port {port}")
+            uvicorn.run(app, host="0.0.0.0", port=int(port))
+        except Exception as e2:
+            print(f"❌ Still failing: {e2}")
+            # Try the main approach as fallback
+            from main import main as run_main
+            sys.argv = ['main.py', '--mode', 'api', '--port', port]
+            print(f"🌐 Starting server on port {port}")
+            run_main()
         
     except ImportError as e:
         print(f"❌ Import error: {e}")
