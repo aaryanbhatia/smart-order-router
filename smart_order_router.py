@@ -87,18 +87,26 @@ class SmartOrderRouter:
             # Try to place order on available exchanges
             for exchange_name, exchange in self.exchanges.items():
                 try:
+                    # Convert symbol format for spot trading
+                    if exchange_name == 'gateio':
+                        spot_symbol = symbol.replace("USDT", "/USDT") if not "/" in symbol else symbol
+                    else:
+                        spot_symbol = symbol.replace("/", "") if "/" in symbol else symbol
+                    
                     if order_type == OrderType.MARKET:
                         order = exchange.create_market_order(
-                            symbol=symbol,
+                            symbol=spot_symbol,
                             side=side.value,
-                            amount=float(quantity)
+                            amount=float(quantity),
+                            params={'type': 'spot'}  # Ensure spot trading only
                         )
                     else:
                         order = exchange.create_limit_order(
-                            symbol=symbol,
+                            symbol=spot_symbol,
                             side=side.value,
                             amount=float(quantity),
-                            price=float(price)
+                            price=float(price),
+                            params={'type': 'spot'}  # Ensure spot trading only
                         )
                     
                     return ExecutionResult(
