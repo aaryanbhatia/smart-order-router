@@ -507,6 +507,7 @@ async def get_prices(symbol: str):
                     effective_ask=price_data.get("best_ask", 0),
                     timestamp=datetime.utcnow()
                 ))
+            # If no data at all, return empty list (no fake data)
         
         return prices
         

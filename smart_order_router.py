@@ -120,19 +120,11 @@ class SmartOrderRouter:
                     logger.warning(f"Failed to place order on {exchange_name}: {e}")
                     continue
             
-            # If all exchanges fail, return demo result
-            logger.info("All exchanges failed, returning demo result")
+            # If all exchanges fail, return failure
+            logger.error("All exchanges failed to place order")
             return ExecutionResult(
-                success=True,
-                total_filled=quantity,
-                average_price=price or Decimal("50000.0"),
-                total_cost=quantity * (price or Decimal("50000.0")),
-                executions=[{
-                    "venue": "demo-exchange",
-                    "quantity": float(quantity),
-                    "price": float(price or Decimal("50000.0")),
-                    "status": "filled"
-                }]
+                success=False,
+                error_message="All exchanges failed to place order"
             )
             
         except Exception as e:
@@ -150,18 +142,20 @@ class SmartOrderRouter:
                 
             exchange = self.exchanges[exchange_name]
             
-            # Convert symbol format: DOGEUSDT -> DOGE/USDT
+            # Convert symbol format based on exchange requirements
             if '/' not in symbol:
-                # Convert BTCUSDT to BTC/USDT
-                if symbol.endswith('USDT'):
-                    base = symbol[:-4]  # Remove USDT
-                    symbol = f"{base}/USDT"
-                elif symbol.endswith('BTC'):
-                    base = symbol[:-3]  # Remove BTC
-                    symbol = f"{base}/BTC"
-                elif symbol.endswith('ETH'):
-                    base = symbol[:-3]  # Remove ETH
-                    symbol = f"{base}/ETH"
+                if exchange_name == 'gateio':
+                    # Gate.io needs DOGE/USDT format
+                    if symbol.endswith('USDT'):
+                        base = symbol[:-4]  # Remove USDT
+                        symbol = f"{base}/USDT"
+                    elif symbol.endswith('BTC'):
+                        base = symbol[:-3]  # Remove BTC
+                        symbol = f"{base}/BTC"
+                    elif symbol.endswith('ETH'):
+                        base = symbol[:-3]  # Remove ETH
+                        symbol = f"{base}/ETH"
+                # MEXC uses DOGEUSDT format (no conversion needed)
             
             ticker = exchange.fetch_ticker(symbol)
             
@@ -217,15 +211,9 @@ class SmartOrderRouter:
                     logger.warning(f"Failed to get prices from {exchange_name}: {e}")
                     continue
             
-            # If no real data, return demo data
+            # If no real data, return empty result
             if best_bid == 0 or best_ask == float('inf'):
-                return {
-                    "best_bid": 50000.0,
-                    "best_ask": 50001.0,
-                    "spread": 1.0,
-                    "spread_bps": 2.0,
-                    "timestamp": datetime.utcnow().isoformat()
-                }
+                return None
             
             spread = best_ask - best_bid
             spread_bps = (spread / best_bid) * 10000 if best_bid > 0 else 0
@@ -242,13 +230,7 @@ class SmartOrderRouter:
             
         except Exception as e:
             logger.error(f"Failed to get best prices: {e}")
-            return {
-                "best_bid": 50000.0,
-                "best_ask": 50001.0,
-                "spread": 1.0,
-                "spread_bps": 2.0,
-                "timestamp": datetime.utcnow().isoformat()
-            }
+            return None
     
     async def get_arbitrage_opportunities(self, symbol: str, min_spread: float = 0.001) -> List[Dict[str, Any]]:
         """Find arbitrage opportunities between venues"""
