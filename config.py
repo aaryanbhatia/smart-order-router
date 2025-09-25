@@ -37,30 +37,47 @@ class SORConfig:
             "gateio": ExchangeConfig(
                 name="gateio",
                 type=ExchangeType.CEX,
+                api_key=os.getenv("GATEIO_API_KEY", ""),
+                secret=os.getenv("GATEIO_SECRET", ""),
+                sandbox=os.getenv("GATEIO_SANDBOX", "true").lower() == "true",
                 trading_fee=0.002,
                 min_order_size=0.001
             ),
             "kucoin": ExchangeConfig(
                 name="kucoin", 
                 type=ExchangeType.CEX,
+                api_key=os.getenv("KUCOIN_API_KEY", ""),
+                secret=os.getenv("KUCOIN_SECRET", ""),
+                passphrase=os.getenv("KUCOIN_PASSPHRASE", ""),
+                sandbox=os.getenv("KUCOIN_SANDBOX", "true").lower() == "true",
                 trading_fee=0.001,
                 min_order_size=0.001
             ),
             "bitget": ExchangeConfig(
                 name="bitget",
                 type=ExchangeType.CEX,
+                api_key=os.getenv("BITGET_API_KEY", ""),
+                secret=os.getenv("BITGET_SECRET", ""),
+                passphrase=os.getenv("BITGET_PASSPHRASE", ""),
+                sandbox=os.getenv("BITGET_SANDBOX", "true").lower() == "true",
                 trading_fee=0.001,
                 min_order_size=0.001
             ),
             "mexc": ExchangeConfig(
                 name="mexc",
                 type=ExchangeType.CEX,
+                api_key=os.getenv("MEXC_API_KEY", ""),
+                secret=os.getenv("MEXC_SECRET", ""),
+                sandbox=os.getenv("MEXC_SANDBOX", "true").lower() == "true",
                 trading_fee=0.002,
                 min_order_size=0.001
             ),
             "bitmart": ExchangeConfig(
                 name="bitmart",
                 type=ExchangeType.CEX,
+                api_key=os.getenv("BITMART_API_KEY", ""),
+                secret=os.getenv("BITMART_SECRET", ""),
+                sandbox=os.getenv("BITMART_SANDBOX", "true").lower() == "true",
                 trading_fee=0.0025,
                 min_order_size=0.001
             ),
