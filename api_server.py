@@ -14,7 +14,6 @@ import uvicorn
 from fastapi import FastAPI, HTTPException, Depends, BackgroundTasks, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field
 from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
@@ -75,9 +74,6 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc"
 )
-
-# Security
-security = HTTPBearer()
 
 # CORS middleware
 app.add_middleware(
@@ -180,10 +176,6 @@ async def get_sor():
         await sor_instance.start()
     return sor_instance
 
-# Authentication (simplified - implement proper auth in production)
-async def verify_token(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    # In production, implement proper JWT or API key validation
-    return credentials.credentials
 
 # Startup event
 @app.on_event("startup")
@@ -232,7 +224,6 @@ async def health_check():
 async def create_order(
     order_request: OrderRequest,
     background_tasks: BackgroundTasks,
-    token: str = Depends(verify_token),
     db = Depends(get_db)
 ):
     """Create a new order"""
@@ -330,7 +321,7 @@ async def create_order(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/orders/{order_id}", response_model=OrderResponse)
-async def get_order(order_id: str, token: str = Depends(verify_token), db = Depends(get_db)):
+async def get_order(order_id: str, db = Depends(get_db)):
     """Get order details"""
     try:
         result = db.execute(text("""
@@ -385,7 +376,6 @@ async def list_orders(
     status: Optional[str] = Query(None),
     limit: int = Query(100, le=1000),
     offset: int = Query(0, ge=0),
-    token: str = Depends(verify_token),
     db = Depends(get_db)
 ):
     """List orders with optional filters"""
@@ -454,32 +444,28 @@ async def list_orders(
         raise HTTPException(status_code=500, detail=str(e))
 
 # Price data endpoints
-@app.get("/prices/{symbol}", response_model=List[PriceData])
-async def get_prices(symbol: str, token: str = Depends(verify_token), db = Depends(get_db)):
+@app.get("/prices/{symbol}")
+async def get_prices(symbol: str):
     """Get current prices for a symbol across all venues"""
     try:
-        result = db.execute(text("""
-            SELECT symbol, venue, bid_price, ask_price, bid_quantity, ask_quantity,
-                   spread_bps, effective_bid, effective_ask, timestamp
-            FROM price_data
-            WHERE symbol = :symbol
-            AND timestamp > NOW() - INTERVAL '1 minute'
-            ORDER BY timestamp DESC
-        """), {"symbol": symbol}).fetchall()
+        sor = await get_sor()
+        price_data = await sor.get_best_prices(symbol)
         
+        # Convert to PriceData format
         prices = []
-        for row in result:
+        if price_data:
+            # Create a single price entry with the best bid/ask
             prices.append(PriceData(
-                symbol=row.symbol,
-                venue=row.venue,
-                bid_price=float(row.bid_price) if row.bid_price else 0,
-                ask_price=float(row.ask_price) if row.ask_price else 0,
-                bid_quantity=float(row.bid_quantity) if row.bid_quantity else 0,
-                ask_quantity=float(row.ask_quantity) if row.ask_quantity else 0,
-                spread_bps=float(row.spread_bps) if row.spread_bps else 0,
-                effective_bid=float(row.effective_bid) if row.effective_bid else 0,
-                effective_ask=float(row.effective_ask) if row.effective_ask else 0,
-                timestamp=row.timestamp
+                symbol=symbol,
+                venue="best",
+                bid_price=price_data.get("best_bid", 0),
+                ask_price=price_data.get("best_ask", 0),
+                bid_quantity=1000.0,  # Default quantity
+                ask_quantity=1000.0,  # Default quantity
+                spread_bps=price_data.get("spread_bps", 0),
+                effective_bid=price_data.get("best_bid", 0),
+                effective_ask=price_data.get("best_ask", 0),
+                timestamp=datetime.utcnow()
             ))
         
         return prices
@@ -491,8 +477,7 @@ async def get_prices(symbol: str, token: str = Depends(verify_token), db = Depen
 @app.get("/arbitrage/{symbol}", response_model=List[ArbitrageOpportunity])
 async def get_arbitrage_opportunities(
     symbol: str,
-    min_spread: float = Query(0.001, ge=0),
-    token: str = Depends(verify_token)
+    min_spread: float = Query(0.001, ge=0)
 ):
     """Get arbitrage opportunities for a symbol"""
     try:
@@ -523,7 +508,6 @@ async def get_arbitrage_opportunities(
 async def get_risk_metrics(
     user_id: str,
     symbol: Optional[str] = Query(None),
-    token: str = Depends(verify_token),
     db = Depends(get_db)
 ):
     """Get risk metrics for a user"""
@@ -580,7 +564,7 @@ async def get_risk_metrics(
 
 # System endpoints
 @app.get("/system/health", response_model=SystemHealth)
-async def get_system_health(token: str = Depends(verify_token)):
+async def get_system_health():
     """Get system health and performance metrics"""
     try:
         sor = await get_sor()
@@ -601,7 +585,7 @@ async def get_system_health(token: str = Depends(verify_token)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/system/stats", response_model=Dict[str, Any])
-async def get_system_stats(token: str = Depends(verify_token)):
+async def get_system_stats():
     """Get detailed system statistics"""
     try:
         sor = await get_sor()
