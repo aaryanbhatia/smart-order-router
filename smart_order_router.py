@@ -142,6 +142,40 @@ class SmartOrderRouter:
                 error_message=str(e)
             )
     
+    async def get_exchange_prices(self, exchange_name: str, symbol: str) -> Dict[str, Any]:
+        """Get prices from a specific exchange"""
+        try:
+            if exchange_name not in self.exchanges:
+                return None
+                
+            exchange = self.exchanges[exchange_name]
+            ticker = exchange.fetch_ticker(symbol)
+            
+            bid = ticker.get('bid', 0)
+            ask = ticker.get('ask', 0)
+            bid_quantity = ticker.get('bidVolume', 1000.0)
+            ask_quantity = ticker.get('askVolume', 1000.0)
+            
+            if bid > 0 and ask > 0:
+                spread = ask - bid
+                spread_bps = (spread / bid) * 10000 if bid > 0 else 0
+                
+                return {
+                    "bid_price": bid,
+                    "ask_price": ask,
+                    "bid_quantity": bid_quantity,
+                    "ask_quantity": ask_quantity,
+                    "spread": spread,
+                    "spread_bps": spread_bps,
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            else:
+                return None
+                
+        except Exception as e:
+            logger.warning(f"Failed to get prices from {exchange_name}: {e}")
+            return None
+
     async def get_best_prices(self, symbol: str) -> Dict[str, Any]:
         """Get best bid/ask prices across all venues"""
         try:
