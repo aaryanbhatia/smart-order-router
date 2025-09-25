@@ -449,65 +449,71 @@ async def get_prices(symbol: str):
     """Get current prices for a symbol across all venues"""
     try:
         sor = await get_sor()
-        
-        # Get individual exchange data instead of aggregated
         prices = []
         
-        # Get Gate.io data
+        # Convert symbol format for exchanges
+        gateio_symbol = symbol.replace("USDT", "/USDT") if not "/" in symbol else symbol
+        mexc_symbol = symbol.replace("/", "") if "/" in symbol else symbol
+        
+        # Get Gate.io data directly
         try:
-            gateio_data = await sor.get_exchange_prices("gateio", symbol)
-            if gateio_data:
-                prices.append(PriceData(
-                    symbol=symbol,
-                    venue="gateio",
-                    bid_price=gateio_data.get("bid_price", 0),
-                    ask_price=gateio_data.get("ask_price", 0),
-                    bid_quantity=gateio_data.get("bid_quantity", 1000.0),
-                    ask_quantity=gateio_data.get("ask_quantity", 1000.0),
-                    spread_bps=gateio_data.get("spread_bps", 0),
-                    effective_bid=gateio_data.get("bid_price", 0),
-                    effective_ask=gateio_data.get("ask_price", 0),
-                    timestamp=datetime.utcnow()
-                ))
+            if "gateio" in sor.exchanges:
+                exchange = sor.exchanges["gateio"]
+                ticker = exchange.fetch_ticker(gateio_symbol)
+                
+                bid = ticker.get('bid', 0)
+                ask = ticker.get('ask', 0)
+                bid_quantity = ticker.get('bidVolume', 1000.0)
+                ask_quantity = ticker.get('askVolume', 1000.0)
+                
+                if bid > 0 and ask > 0:
+                    spread = ask - bid
+                    spread_bps = (spread / bid) * 10000 if bid > 0 else 0
+                    
+                    prices.append(PriceData(
+                        symbol=symbol,
+                        venue="gateio",
+                        bid_price=bid,
+                        ask_price=ask,
+                        bid_quantity=bid_quantity,
+                        ask_quantity=ask_quantity,
+                        spread_bps=spread_bps,
+                        effective_bid=bid,
+                        effective_ask=ask,
+                        timestamp=datetime.utcnow()
+                    ))
         except Exception as e:
             logger.warning(f"Failed to get Gate.io prices: {e}")
         
-        # Get MEXC data
+        # Get MEXC data directly
         try:
-            mexc_data = await sor.get_exchange_prices("mexc", symbol)
-            if mexc_data:
-                prices.append(PriceData(
-                    symbol=symbol,
-                    venue="mexc",
-                    bid_price=mexc_data.get("bid_price", 0),
-                    ask_price=mexc_data.get("ask_price", 0),
-                    bid_quantity=mexc_data.get("bid_quantity", 1000.0),
-                    ask_quantity=mexc_data.get("ask_quantity", 1000.0),
-                    spread_bps=mexc_data.get("spread_bps", 0),
-                    effective_bid=mexc_data.get("bid_price", 0),
-                    effective_ask=mexc_data.get("ask_price", 0),
-                    timestamp=datetime.utcnow()
-                ))
+            if "mexc" in sor.exchanges:
+                exchange = sor.exchanges["mexc"]
+                ticker = exchange.fetch_ticker(mexc_symbol)
+                
+                bid = ticker.get('bid', 0)
+                ask = ticker.get('ask', 0)
+                bid_quantity = ticker.get('bidVolume', 1000.0)
+                ask_quantity = ticker.get('askVolume', 1000.0)
+                
+                if bid > 0 and ask > 0:
+                    spread = ask - bid
+                    spread_bps = (spread / bid) * 10000 if bid > 0 else 0
+                    
+                    prices.append(PriceData(
+                        symbol=symbol,
+                        venue="mexc",
+                        bid_price=bid,
+                        ask_price=ask,
+                        bid_quantity=bid_quantity,
+                        ask_quantity=ask_quantity,
+                        spread_bps=spread_bps,
+                        effective_bid=bid,
+                        effective_ask=ask,
+                        timestamp=datetime.utcnow()
+                    ))
         except Exception as e:
             logger.warning(f"Failed to get MEXC prices: {e}")
-        
-        # If no individual data, fall back to aggregated
-        if not prices:
-            price_data = await sor.get_best_prices(symbol)
-            if price_data:
-                prices.append(PriceData(
-                    symbol=symbol,
-                    venue="best",
-                    bid_price=price_data.get("best_bid", 0),
-                    ask_price=price_data.get("best_ask", 0),
-                    bid_quantity=1000.0,
-                    ask_quantity=1000.0,
-                    spread_bps=price_data.get("spread_bps", 0),
-                    effective_bid=price_data.get("best_bid", 0),
-                    effective_ask=price_data.get("best_ask", 0),
-                    timestamp=datetime.utcnow()
-                ))
-            # If no data at all, return empty list (no fake data)
         
         return prices
         
