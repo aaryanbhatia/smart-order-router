@@ -149,6 +149,20 @@ class SmartOrderRouter:
                 return None
                 
             exchange = self.exchanges[exchange_name]
+            
+            # Convert symbol format: DOGEUSDT -> DOGE/USDT
+            if '/' not in symbol:
+                # Convert BTCUSDT to BTC/USDT
+                if symbol.endswith('USDT'):
+                    base = symbol[:-4]  # Remove USDT
+                    symbol = f"{base}/USDT"
+                elif symbol.endswith('BTC'):
+                    base = symbol[:-3]  # Remove BTC
+                    symbol = f"{base}/BTC"
+                elif symbol.endswith('ETH'):
+                    base = symbol[:-3]  # Remove ETH
+                    symbol = f"{base}/ETH"
+            
             ticker = exchange.fetch_ticker(symbol)
             
             bid = ticker.get('bid', 0)
@@ -173,7 +187,7 @@ class SmartOrderRouter:
                 return None
                 
         except Exception as e:
-            logger.warning(f"Failed to get prices from {exchange_name}: {e}")
+            logger.warning(f"Failed to get prices from {exchange_name} for {symbol}: {e}")
             return None
 
     async def get_best_prices(self, symbol: str) -> Dict[str, Any]:
