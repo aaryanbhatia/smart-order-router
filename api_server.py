@@ -499,6 +499,89 @@ async def get_prices(symbol: str):
         logger.error(f"Failed to get prices: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/depth/{symbol}")
+async def get_order_book_depth(symbol: str, bps: int = 20):
+    """Get order book depth within specified bps for all venues"""
+    try:
+        sor = await get_sor()
+        depth_data = []
+        
+        # Convert symbol format for exchanges
+        gateio_symbol = symbol.replace("USDT", "/USDT") if not "/" in symbol else symbol
+        mexc_symbol = symbol.replace("/", "") if "/" in symbol else symbol
+        
+        for exchange_name, exchange in sor.exchanges.items():
+            try:
+                # Get symbol format for this exchange
+                if exchange_name == 'gateio':
+                    exchange_symbol = gateio_symbol
+                else:
+                    exchange_symbol = mexc_symbol
+                
+                # Fetch order book
+                order_book = exchange.fetch_order_book(exchange_symbol, params={'type': 'spot'})
+                bids = order_book.get('bids', [])
+                asks = order_book.get('asks', [])
+                
+                if not bids or not asks:
+                    continue
+                
+                # Calculate depth for both sides
+                for side in ['buy', 'sell']:
+                    if side == 'buy':
+                        orders = asks  # Buy at ask prices
+                        base_price = asks[0][0] if asks else 0
+                    else:
+                        orders = bids  # Sell at bid prices  
+                        base_price = bids[0][0] if bids else 0
+                    
+                    if base_price == 0:
+                        continue
+                    
+                    # Calculate price range within bps
+                    price_range = base_price * (bps / 10000)
+                    if side == 'buy':
+                        max_price = base_price + price_range
+                    else:
+                        max_price = base_price - price_range
+                    
+                    # Scan orders within price range
+                    total_qty = 0
+                    total_value = 0
+                    
+                    for price, quantity in orders:
+                        if side == 'buy' and price <= max_price:
+                            total_qty += quantity
+                            total_value += price * quantity
+                        elif side == 'sell' and price >= max_price:
+                            total_qty += quantity
+                            total_value += price * quantity
+                        else:
+                            break  # Orders are sorted, so we can stop
+                    
+                    if total_qty > 0:
+                        vwap = total_value / total_qty
+                        depth_data.append({
+                            'venue': exchange_name,
+                            'side': side,
+                            'symbol': symbol,
+                            'base_price': base_price,
+                            'max_price': max_price,
+                            'total_quantity': total_qty,
+                            'vwap': vwap,
+                            'bps': bps
+                        })
+                        
+            except Exception as e:
+                logger.warning(f"Failed to get depth from {exchange_name}: {e}")
+                continue
+        
+        return depth_data
+        
+    except Exception as e:
+        logger.error(f"Failed to get order book depth: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/arbitrage/{symbol}", response_model=List[ArbitrageOpportunity])
 async def get_arbitrage_opportunities(
     symbol: str,

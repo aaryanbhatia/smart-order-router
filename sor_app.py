@@ -91,33 +91,31 @@ def fetch_entry_tob_with_qty(venue, symbol, side):
         return 0.0, 0.0
 
 def depth_within_bps(venue, symbol, side, taker, bps):
-    """Calculate depth within basis points from cloud API"""
+    """Calculate depth within basis points from cloud API using real order book data"""
     try:
         # Convert BTC/USDT to BTCUSDT for API
         api_symbol = symbol.replace("/", "")
-        prices = call_api(f"/prices/{api_symbol}")
-        if not prices:
+        depth_data = call_api(f"/depth/{api_symbol}?bps={bps}")
+        
+        if not depth_data:
             return 0.0, 0.0
         
-        # Find data for the specific venue
-        price_data = None
-        for p in prices:
-            if p.get("venue", "").lower() == venue.lower():
-                price_data = p
-                break
+        # Find data for the specific venue and side
+        for data in depth_data:
+            if (data.get("venue", "").lower() == venue.lower() and 
+                data.get("side", "") == side):
+                
+                total_qty = data.get("total_quantity", 0)
+                vwap = data.get("vwap", 0)
+                
+                # Apply taker fee to VWAP
+                effective_vwap = vwap * (1 + taker if side == "buy" else 1 - taker)
+                
+                return float(total_qty), float(effective_vwap)
         
-        if not price_data:
-            price_data = prices[0]  # Fallback to first available
+        # Fallback if no depth data found
+        return 0.0, 0.0
         
-        base_price = price_data.get("ask_price" if side == "buy" else "bid_price", 0)
-        base_qty = price_data.get("ask_quantity" if side == "buy" else "bid_quantity", 0)
-        
-        # Simulate depth calculation
-        depth_factor = 1 + (bps / 10000)
-        max_qty = float(base_qty) * depth_factor
-        vwap = float(base_price) * (1 + taker if side == "buy" else 1 - taker)
-        
-        return max_qty, vwap
     except Exception as e:
         st.warning(f"[{venue}] depth calculation failed: {e}")
         return 0.0, 0.0
