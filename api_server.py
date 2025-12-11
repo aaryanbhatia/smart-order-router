@@ -460,7 +460,11 @@ async def get_prices(symbol: str):
                     # Convert symbol format based on exchange
                     if exchange_name == 'gateio':
                         exchange_symbol = symbol.replace("USDT", "/USDT") if not "/" in symbol else symbol
-                    else:
+                    elif exchange_name == 'kucoin':
+                        exchange_symbol = symbol.replace("/", "-") if "/" in symbol else symbol
+                    elif exchange_name == 'bitget':
+                        exchange_symbol = symbol.replace("/", "") if "/" in symbol else symbol
+                    else:  # mexc and others
                         exchange_symbol = symbol.replace("/", "") if "/" in symbol else symbol
                     
                     # Fetch order book for top of book data (spot market only)
@@ -509,13 +513,19 @@ async def get_order_book_depth(symbol: str, bps: int = 20):
         # Convert symbol format for exchanges
         gateio_symbol = symbol.replace("USDT", "/USDT") if not "/" in symbol else symbol
         mexc_symbol = symbol.replace("/", "") if "/" in symbol else symbol
+        bitget_symbol = symbol.replace("/", "") if "/" in symbol else symbol
+        kucoin_symbol = symbol.replace("/", "-") if "/" in symbol else symbol
         
         for exchange_name, exchange in sor.exchanges.items():
             try:
                 # Get symbol format for this exchange
                 if exchange_name == 'gateio':
                     exchange_symbol = gateio_symbol
-                else:
+                elif exchange_name == 'kucoin':
+                    exchange_symbol = kucoin_symbol
+                elif exchange_name == 'bitget':
+                    exchange_symbol = bitget_symbol
+                else:  # mexc and others
                     exchange_symbol = mexc_symbol
                 
                 # Fetch order book

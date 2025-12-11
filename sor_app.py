@@ -14,6 +14,8 @@ API_BASE_URL = os.getenv("API_BASE_URL", "https://smart-order-router.onrender.co
 EXCHS = {
     "gateio": {"label": "Gate.io", "env": "GATE"},
     "mexc":   {"label": "MEXC",   "env": "MEXC"},
+    "bitget": {"label": "Bitget", "env": "BITGET"},
+    "kucoin": {"label": "KuCoin", "env": "KUCOIN"},
 }
 
 # --------------- API Helpers ------------------
@@ -154,6 +156,7 @@ def fmt(x, d=8):
 st.set_page_config(page_title="SOR — Smart Order Router", layout="centered")
 st.title("SOR — Smart Order Router")
 st.caption("Cloud API • Real-time trading • Multi-exchange support")
+st.info("ℹ️ Data sourced from official exchange APIs. Live websites may show different aggregated data.")
 
 # API Status Check
 with st.sidebar:
@@ -171,6 +174,7 @@ with colA:
     symbol = st.text_input("Symbol", value=DEFAULT_SYMBOL).upper().strip()
 with colB:
     side = st.radio("Side", ["buy","sell"], horizontal=True)
+    st.session_state.current_side = side  # Store current side
 with colC:
     show_depth = st.checkbox("Depth (bps)", value=True)
 
@@ -181,6 +185,8 @@ st.divider()
 with st.expander("Per-exchange symbol overrides (optional)"):
     ovr_gate = st.text_input("Gate.io override", value="")
     ovr_mexc = st.text_input("MEXC override", value="")
+    ovr_bitget = st.text_input("Bitget override", value="")
+    ovr_kucoin = st.text_input("KuCoin override", value="")
 
 btn_fetch = st.button("Fetch quotes")
 
@@ -189,6 +195,8 @@ if 'price_data' not in st.session_state:
     st.session_state.price_data = None
 if 'rows' not in st.session_state:
     st.session_state.rows = []
+if 'current_side' not in st.session_state:
+    st.session_state.current_side = 'buy'
 
 if btn_fetch:
     # Fetch prices from cloud API
@@ -233,7 +241,18 @@ if btn_fetch:
 
 # Use stored data if available
 if st.session_state.rows:
-    rows = st.session_state.rows
+    rows = st.session_state.rows.copy()  # Make a copy to avoid modifying session state
+    
+    # Recalculate depth if bps changed or depth is enabled
+    if show_depth:
+        for row in rows:
+            venue = row["k"]
+            symbol = row["sym"]
+            side = st.session_state.get('current_side', 'buy')
+            tk = row["taker"]
+            mx, vwap = depth_within_bps(venue, symbol, side, tk, bps)
+            row["mx"] = mx
+            row["vwap"] = vwap
 
     st.subheader("Fast snapshot (your side)")
     st.table([{

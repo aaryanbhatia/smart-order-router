@@ -50,6 +50,30 @@ class SmartOrderRouter:
                     'enableRateLimit': True,
                 })
                 logger.info(f"MEXC exchange initialized with API key: {mexc_config.api_key[:8] if mexc_config.api_key else 'None'}...")
+            
+            # Bitget
+            if hasattr(config, 'exchanges') and 'bitget' in config.exchanges:
+                bitget_config = config.exchanges['bitget']
+                self.exchanges['bitget'] = ccxt.bitget({
+                    'apiKey': bitget_config.api_key or '',
+                    'secret': bitget_config.secret or '',
+                    'passphrase': bitget_config.passphrase or '',
+                    'sandbox': bitget_config.sandbox,
+                    'enableRateLimit': True,
+                })
+                logger.info(f"Bitget exchange initialized with API key: {bitget_config.api_key[:8] if bitget_config.api_key else 'None'}...")
+            
+            # KuCoin
+            if hasattr(config, 'exchanges') and 'kucoin' in config.exchanges:
+                kucoin_config = config.exchanges['kucoin']
+                self.exchanges['kucoin'] = ccxt.kucoin({
+                    'apiKey': kucoin_config.api_key or '',
+                    'secret': kucoin_config.secret or '',
+                    'passphrase': kucoin_config.passphrase or '',
+                    'sandbox': kucoin_config.sandbox,
+                    'enableRateLimit': True,
+                })
+                logger.info(f"KuCoin exchange initialized with API key: {kucoin_config.api_key[:8] if kucoin_config.api_key else 'None'}...")
                 
         except Exception as e:
             logger.warning(f"Failed to initialize exchanges: {e}")
@@ -90,7 +114,11 @@ class SmartOrderRouter:
                     # Convert symbol format for spot trading
                     if exchange_name == 'gateio':
                         spot_symbol = symbol.replace("USDT", "/USDT") if not "/" in symbol else symbol
-                    else:
+                    elif exchange_name == 'kucoin':
+                        spot_symbol = symbol.replace("/", "-") if "/" in symbol else symbol
+                    elif exchange_name == 'bitget':
+                        spot_symbol = symbol.replace("/", "") if "/" in symbol else symbol
+                    else:  # mexc and others
                         spot_symbol = symbol.replace("/", "") if "/" in symbol else symbol
                     
                     if order_type == OrderType.MARKET:
@@ -163,7 +191,18 @@ class SmartOrderRouter:
                     elif symbol.endswith('ETH'):
                         base = symbol[:-3]  # Remove ETH
                         symbol = f"{base}/ETH"
-                # MEXC uses DOGEUSDT format (no conversion needed)
+                elif exchange_name == 'kucoin':
+                    # KuCoin uses DOGE-USDT format
+                    if symbol.endswith('USDT'):
+                        base = symbol[:-4]
+                        symbol = f"{base}-USDT"
+                    elif symbol.endswith('BTC'):
+                        base = symbol[:-3]
+                        symbol = f"{base}-BTC"
+                    elif symbol.endswith('ETH'):
+                        base = symbol[:-3]
+                        symbol = f"{base}-ETH"
+                # MEXC and Bitget use DOGEUSDT format (no conversion needed)
             
             ticker = exchange.fetch_ticker(symbol)
             
