@@ -486,7 +486,12 @@ async def get_prices(symbol: str):
                         exchange_symbol = symbol.replace("/", "") if "/" in symbol else symbol
                     
                     # Fetch order book for top of book data (spot market only)
-                    order_book = exchange.fetch_order_book(exchange_symbol, params={'type': 'spot'})
+                    if exchange_name == 'bitget':
+                        # Bitget: uppercase symbol, let CCXT handle params
+                        exchange_symbol = exchange_symbol.upper()
+                        order_book = exchange.fetch_order_book(exchange_symbol, limit=5)
+                    else:
+                        order_book = exchange.fetch_order_book(exchange_symbol, params={'type': 'spot'})
                     bids = order_book.get('bids', [])
                     asks = order_book.get('asks', [])
                     
@@ -567,8 +572,13 @@ async def get_order_book_depth(symbol: str, bps: int = 20):
                 else:  # mexc and others
                     exchange_symbol = mexc_symbol
                 
-                # Fetch order book
-                order_book = exchange.fetch_order_book(exchange_symbol, params={'type': 'spot'})
+                # Fetch order book with exchange-specific parameters
+                if exchange_name == 'bitget':
+                    # Bitget: uppercase symbol, let CCXT handle params
+                    exchange_symbol = exchange_symbol.upper()
+                    order_book = exchange.fetch_order_book(exchange_symbol, limit=25)
+                else:
+                    order_book = exchange.fetch_order_book(exchange_symbol, params={'type': 'spot'})
                 bids = order_book.get('bids', [])
                 asks = order_book.get('asks', [])
                 
