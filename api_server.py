@@ -317,8 +317,14 @@ async def create_order(
         
     except Exception as e:
         db.rollback()
-        logger.error(f"Failed to create order: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        error_msg = str(e)
+        logger.error(f"Failed to create order: {error_msg}")
+        logger.exception(e)  # Log full traceback for debugging
+        # Return more detailed error information
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Order placement failed: {error_msg}. Check logs for details."
+        )
 
 @app.get("/orders/{order_id}", response_model=OrderResponse)
 async def get_order(order_id: str, db = Depends(get_db)):

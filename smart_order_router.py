@@ -135,25 +135,43 @@ class SmartOrderRouter:
                         else:
                             spot_symbol = symbol
                     elif exchange_name == 'bitget':
-                        spot_symbol = symbol.replace("/", "") if "/" in symbol else symbol
+                        spot_symbol = symbol.replace("/", "").upper() if "/" in symbol else symbol.upper()
                     else:  # mexc and others
                         spot_symbol = symbol.replace("/", "") if "/" in symbol else symbol
                     
-                    if order_type == OrderType.MARKET:
-                        order = exchange.create_market_order(
-                            symbol=spot_symbol,
-                            side=side.value,
-                            amount=float(quantity),
-                            params={'type': 'spot'}  # Ensure spot trading only
-                        )
+                    # Exchange-specific order placement
+                    if exchange_name == 'bitget':
+                        # Bitget doesn't need 'type' param, uses uppercase symbols
+                        if order_type == OrderType.MARKET:
+                            order = exchange.create_market_order(
+                                symbol=spot_symbol,
+                                side=side.value,
+                                amount=float(quantity)
+                            )
+                        else:
+                            order = exchange.create_limit_order(
+                                symbol=spot_symbol,
+                                side=side.value,
+                                amount=float(quantity),
+                                price=float(price)
+                            )
                     else:
-                        order = exchange.create_limit_order(
-                            symbol=spot_symbol,
-                            side=side.value,
-                            amount=float(quantity),
-                            price=float(price),
-                            params={'type': 'spot'}  # Ensure spot trading only
-                        )
+                        # Other exchanges use 'type': 'spot' param
+                        if order_type == OrderType.MARKET:
+                            order = exchange.create_market_order(
+                                symbol=spot_symbol,
+                                side=side.value,
+                                amount=float(quantity),
+                                params={'type': 'spot'}  # Ensure spot trading only
+                            )
+                        else:
+                            order = exchange.create_limit_order(
+                                symbol=spot_symbol,
+                                side=side.value,
+                                amount=float(quantity),
+                                price=float(price),
+                                params={'type': 'spot'}  # Ensure spot trading only
+                            )
                     
                     return ExecutionResult(
                         success=True,
