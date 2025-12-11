@@ -57,7 +57,7 @@ class SmartOrderRouter:
                 self.exchanges['bitget'] = ccxt.bitget({
                     'apiKey': bitget_config.api_key or '',
                     'secret': bitget_config.secret or '',
-                    'passphrase': bitget_config.passphrase or '',
+                    'password': bitget_config.passphrase or '',  # CCXT uses 'password' for passphrase
                     'sandbox': bitget_config.sandbox,
                     'enableRateLimit': True,
                 })
@@ -69,7 +69,7 @@ class SmartOrderRouter:
                 self.exchanges['kucoin'] = ccxt.kucoin({
                     'apiKey': kucoin_config.api_key or '',
                     'secret': kucoin_config.secret or '',
-                    'passphrase': kucoin_config.passphrase or '',
+                    'password': kucoin_config.passphrase or '',  # CCXT uses 'password' for passphrase
                     'sandbox': kucoin_config.sandbox,
                     'enableRateLimit': True,
                 })
