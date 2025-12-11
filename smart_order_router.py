@@ -113,9 +113,27 @@ class SmartOrderRouter:
                 try:
                     # Convert symbol format for spot trading
                     if exchange_name == 'gateio':
-                        spot_symbol = symbol.replace("USDT", "/USDT") if not "/" in symbol else symbol
+                        if "/" in symbol:
+                            spot_symbol = symbol
+                        elif symbol.endswith("USDT"):
+                            spot_symbol = symbol.replace("USDT", "/USDT")
+                        elif symbol.endswith("BTC"):
+                            spot_symbol = symbol.replace("BTC", "/BTC")
+                        elif symbol.endswith("ETH"):
+                            spot_symbol = symbol.replace("ETH", "/ETH")
+                        else:
+                            spot_symbol = symbol
                     elif exchange_name == 'kucoin':
-                        spot_symbol = symbol.replace("/", "-") if "/" in symbol else symbol
+                        if "/" in symbol:
+                            spot_symbol = symbol.replace("/", "-")
+                        elif symbol.endswith("USDT"):
+                            spot_symbol = symbol.replace("USDT", "-USDT")
+                        elif symbol.endswith("BTC"):
+                            spot_symbol = symbol.replace("BTC", "-BTC")
+                        elif symbol.endswith("ETH"):
+                            spot_symbol = symbol.replace("ETH", "-ETH")
+                        else:
+                            spot_symbol = symbol
                     elif exchange_name == 'bitget':
                         spot_symbol = symbol.replace("/", "") if "/" in symbol else symbol
                     else:  # mexc and others
@@ -203,6 +221,13 @@ class SmartOrderRouter:
                         base = symbol[:-3]
                         symbol = f"{base}-ETH"
                 # MEXC and Bitget use DOGEUSDT format (no conversion needed)
+            else:
+                # Symbol has / separator, convert based on exchange
+                if exchange_name == 'kucoin':
+                    symbol = symbol.replace("/", "-")
+                elif exchange_name in ['mexc', 'bitget']:
+                    symbol = symbol.replace("/", "")
+                # Gate.io uses / format, no conversion needed
             
             ticker = exchange.fetch_ticker(symbol)
             

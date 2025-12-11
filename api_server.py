@@ -459,9 +459,27 @@ async def get_prices(symbol: str):
                 try:
                     # Convert symbol format based on exchange
                     if exchange_name == 'gateio':
-                        exchange_symbol = symbol.replace("USDT", "/USDT") if not "/" in symbol else symbol
+                        if "/" in symbol:
+                            exchange_symbol = symbol
+                        elif symbol.endswith("USDT"):
+                            exchange_symbol = symbol.replace("USDT", "/USDT")
+                        elif symbol.endswith("BTC"):
+                            exchange_symbol = symbol.replace("BTC", "/BTC")
+                        elif symbol.endswith("ETH"):
+                            exchange_symbol = symbol.replace("ETH", "/ETH")
+                        else:
+                            exchange_symbol = symbol
                     elif exchange_name == 'kucoin':
-                        exchange_symbol = symbol.replace("/", "-") if "/" in symbol else symbol
+                        if "/" in symbol:
+                            exchange_symbol = symbol.replace("/", "-")
+                        elif symbol.endswith("USDT"):
+                            exchange_symbol = symbol.replace("USDT", "-USDT")
+                        elif symbol.endswith("BTC"):
+                            exchange_symbol = symbol.replace("BTC", "-BTC")
+                        elif symbol.endswith("ETH"):
+                            exchange_symbol = symbol.replace("ETH", "-ETH")
+                        else:
+                            exchange_symbol = symbol
                     elif exchange_name == 'bitget':
                         exchange_symbol = symbol.replace("/", "") if "/" in symbol else symbol
                     else:  # mexc and others
@@ -511,10 +529,31 @@ async def get_order_book_depth(symbol: str, bps: int = 20):
         depth_data = []
         
         # Convert symbol format for exchanges
-        gateio_symbol = symbol.replace("USDT", "/USDT") if not "/" in symbol else symbol
-        mexc_symbol = symbol.replace("/", "") if "/" in symbol else symbol
-        bitget_symbol = symbol.replace("/", "") if "/" in symbol else symbol
-        kucoin_symbol = symbol.replace("/", "-") if "/" in symbol else symbol
+        if "/" in symbol:
+            gateio_symbol = symbol
+            mexc_symbol = symbol.replace("/", "")
+            bitget_symbol = symbol.replace("/", "")
+            kucoin_symbol = symbol.replace("/", "-")
+        elif symbol.endswith("USDT"):
+            gateio_symbol = symbol.replace("USDT", "/USDT")
+            mexc_symbol = symbol
+            bitget_symbol = symbol
+            kucoin_symbol = symbol.replace("USDT", "-USDT")
+        elif symbol.endswith("BTC"):
+            gateio_symbol = symbol.replace("BTC", "/BTC")
+            mexc_symbol = symbol
+            bitget_symbol = symbol
+            kucoin_symbol = symbol.replace("BTC", "-BTC")
+        elif symbol.endswith("ETH"):
+            gateio_symbol = symbol.replace("ETH", "/ETH")
+            mexc_symbol = symbol
+            bitget_symbol = symbol
+            kucoin_symbol = symbol.replace("ETH", "-ETH")
+        else:
+            gateio_symbol = symbol
+            mexc_symbol = symbol
+            bitget_symbol = symbol
+            kucoin_symbol = symbol
         
         for exchange_name, exchange in sor.exchanges.items():
             try:
