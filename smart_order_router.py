@@ -169,20 +169,22 @@ class SmartOrderRouter:
                         except:
                             pass  # Continue even if market load fails
                         
+                        # Gate.io requires specific order format
                         if order_type == OrderType.MARKET:
                             order = exchange.create_market_order(
                                 symbol=spot_symbol,
                                 side=side.value,
                                 amount=float(quantity),
-                                params={'type': 'spot'}
+                                params={'type': 'spot', 'account': 'spot'}
                             )
                         else:
+                            # Gate.io limit orders need account parameter
                             order = exchange.create_limit_order(
                                 symbol=spot_symbol,
                                 side=side.value,
                                 amount=float(quantity),
                                 price=float(price),
-                                params={'type': 'spot'}
+                                params={'type': 'spot', 'account': 'spot'}
                             )
                     else:
                         # Other exchanges use 'type': 'spot' param
