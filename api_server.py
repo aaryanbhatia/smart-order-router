@@ -492,11 +492,18 @@ async def get_prices(symbol: str):
                         exchange_symbol = symbol.replace("/", "") if "/" in symbol else symbol
                     
                     # Fetch order book for top of book data (spot market only)
+                    # Each exchange has different requirements
                     if exchange_name == 'bitget':
-                        # Bitget: uppercase symbol, let CCXT handle params
+                        # Bitget: uppercase symbol, no 'type' param
                         exchange_symbol = exchange_symbol.upper()
                         order_book = exchange.fetch_order_book(exchange_symbol, limit=5)
-                    else:
+                    elif exchange_name == 'kucoin':
+                        # KuCoin: dash format, no 'type' param
+                        order_book = exchange.fetch_order_book(exchange_symbol, limit=5)
+                    elif exchange_name == 'gateio':
+                        # Gate.io: slash format, needs 'type': 'spot' param
+                        order_book = exchange.fetch_order_book(exchange_symbol, limit=5, params={'type': 'spot'})
+                    else:  # mexc and others
                         order_book = exchange.fetch_order_book(exchange_symbol, params={'type': 'spot'})
                     bids = order_book.get('bids', [])
                     asks = order_book.get('asks', [])
@@ -580,10 +587,16 @@ async def get_order_book_depth(symbol: str, bps: int = 20):
                 
                 # Fetch order book with exchange-specific parameters
                 if exchange_name == 'bitget':
-                    # Bitget: uppercase symbol, let CCXT handle params
+                    # Bitget: uppercase symbol, no 'type' param
                     exchange_symbol = exchange_symbol.upper()
                     order_book = exchange.fetch_order_book(exchange_symbol, limit=25)
-                else:
+                elif exchange_name == 'kucoin':
+                    # KuCoin: dash format, no 'type' param
+                    order_book = exchange.fetch_order_book(exchange_symbol, limit=25)
+                elif exchange_name == 'gateio':
+                    # Gate.io: slash format, needs 'type': 'spot' param
+                    order_book = exchange.fetch_order_book(exchange_symbol, limit=25, params={'type': 'spot'})
+                else:  # mexc and others
                     order_book = exchange.fetch_order_book(exchange_symbol, params={'type': 'spot'})
                 bids = order_book.get('bids', [])
                 asks = order_book.get('asks', [])

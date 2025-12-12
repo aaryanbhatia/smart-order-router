@@ -54,25 +54,31 @@ class SmartOrderRouter:
             # Bitget
             if hasattr(config, 'exchanges') and 'bitget' in config.exchanges:
                 bitget_config = config.exchanges['bitget']
-                self.exchanges['bitget'] = ccxt.bitget({
+                # Only include password if passphrase is provided (for authenticated calls)
+                bitget_params = {
                     'apiKey': bitget_config.api_key or '',
                     'secret': bitget_config.secret or '',
-                    'password': bitget_config.passphrase or '',  # CCXT uses 'password' for passphrase
                     'sandbox': bitget_config.sandbox,
                     'enableRateLimit': True,
-                })
+                }
+                if bitget_config.passphrase:
+                    bitget_params['password'] = bitget_config.passphrase  # CCXT uses 'password' for passphrase
+                self.exchanges['bitget'] = ccxt.bitget(bitget_params)
                 logger.info(f"Bitget exchange initialized with API key: {bitget_config.api_key[:8] if bitget_config.api_key else 'None'}...")
             
             # KuCoin
             if hasattr(config, 'exchanges') and 'kucoin' in config.exchanges:
                 kucoin_config = config.exchanges['kucoin']
-                self.exchanges['kucoin'] = ccxt.kucoin({
+                # Only include password if passphrase is provided (for authenticated calls)
+                kucoin_params = {
                     'apiKey': kucoin_config.api_key or '',
                     'secret': kucoin_config.secret or '',
-                    'password': kucoin_config.passphrase or '',  # CCXT uses 'password' for passphrase
                     'sandbox': kucoin_config.sandbox,
                     'enableRateLimit': True,
-                })
+                }
+                if kucoin_config.passphrase:
+                    kucoin_params['password'] = kucoin_config.passphrase  # CCXT uses 'password' for passphrase
+                self.exchanges['kucoin'] = ccxt.kucoin(kucoin_params)
                 logger.info(f"KuCoin exchange initialized with API key: {kucoin_config.api_key[:8] if kucoin_config.api_key else 'None'}...")
                 
         except Exception as e:
