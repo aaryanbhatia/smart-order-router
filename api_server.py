@@ -498,11 +498,51 @@ async def get_prices(symbol: str):
                         exchange_symbol = exchange_symbol.upper()
                         order_book = exchange.fetch_order_book(exchange_symbol, limit=5)
                     elif exchange_name == 'kucoin':
-                        # KuCoin: dash format, no 'type' param
-                        order_book = exchange.fetch_order_book(exchange_symbol, limit=5)
+                        # KuCoin: dash format, no 'type' param, may need markets loaded
+                        # Note: KuCoin may block US IPs (Render servers), handle gracefully
+                        try:
+                            if not hasattr(exchange, 'markets') or not exchange.markets:
+                                exchange.load_markets()
+                            # Try to find symbol in markets (KuCoin might have specific format)
+                            if exchange_symbol in exchange.markets:
+                                order_book = exchange.fetch_order_book(exchange_symbol, limit=5)
+                            else:
+                                # Try uppercase version
+                                exchange_symbol_upper = exchange_symbol.upper()
+                                if exchange_symbol_upper in exchange.markets:
+                                    order_book = exchange.fetch_order_book(exchange_symbol_upper, limit=5)
+                                else:
+                                    # Fallback: try direct call
+                                    order_book = exchange.fetch_order_book(exchange_symbol, limit=5)
+                        except Exception as load_error:
+                            error_str = str(load_error)
+                            # Check if it's a geographic restriction
+                            if "U.S." in error_str or "400302" in error_str or "restricted" in error_str.lower():
+                                logger.warning(f"KuCoin blocked due to geographic restriction (Render server IP). Skipping KuCoin.")
+                                continue  # Skip KuCoin, continue with other exchanges
+                            logger.warning(f"KuCoin market load failed, trying direct: {load_error}")
+                            try:
+                                order_book = exchange.fetch_order_book(exchange_symbol, limit=5)
+                            except Exception as direct_error:
+                                error_str = str(direct_error)
+                                if "U.S." in error_str or "400302" in error_str or "restricted" in error_str.lower():
+                                    logger.warning(f"KuCoin blocked due to geographic restriction. Skipping.")
+                                    continue
+                                raise
                     elif exchange_name == 'gateio':
-                        # Gate.io: slash format, needs 'type': 'spot' param
-                        order_book = exchange.fetch_order_book(exchange_symbol, limit=5, params={'type': 'spot'})
+                        # Gate.io: slash format, needs 'type': 'spot' param, may need markets loaded
+                        try:
+                            if not hasattr(exchange, 'markets') or not exchange.markets:
+                                exchange.load_markets()
+                            # Try to find symbol in markets
+                            if exchange_symbol in exchange.markets:
+                                order_book = exchange.fetch_order_book(exchange_symbol, limit=5, params={'type': 'spot'})
+                            else:
+                                # Fallback: try direct call
+                                order_book = exchange.fetch_order_book(exchange_symbol, limit=5, params={'type': 'spot'})
+                        except Exception as load_error:
+                            logger.warning(f"Gate.io market load failed, trying direct: {load_error}")
+                            order_book = exchange.fetch_order_book(exchange_symbol, limit=5, params={'type': 'spot'})
                     else:  # mexc and others
                         order_book = exchange.fetch_order_book(exchange_symbol, params={'type': 'spot'})
                     bids = order_book.get('bids', [])
@@ -530,7 +570,9 @@ async def get_prices(symbol: str):
                                 timestamp=datetime.utcnow()
                             ))
                 except Exception as e:
-                    logger.warning(f"Failed to get prices from {exchange_name}: {e}")
+                    logger.warning(f"Failed to get prices from {exchange_name} for symbol {symbol} (converted: {exchange_symbol}): {e}")
+                    import traceback
+                    logger.debug(traceback.format_exc())
                     continue
         
         return prices
@@ -591,11 +633,51 @@ async def get_order_book_depth(symbol: str, bps: int = 20):
                     exchange_symbol = exchange_symbol.upper()
                     order_book = exchange.fetch_order_book(exchange_symbol, limit=25)
                 elif exchange_name == 'kucoin':
-                    # KuCoin: dash format, no 'type' param
-                    order_book = exchange.fetch_order_book(exchange_symbol, limit=25)
+                    # KuCoin: dash format, no 'type' param, may need markets loaded
+                    # Note: KuCoin may block US IPs (Render servers), handle gracefully
+                    try:
+                        if not hasattr(exchange, 'markets') or not exchange.markets:
+                            exchange.load_markets()
+                        # Try to find symbol in markets
+                        if exchange_symbol in exchange.markets:
+                            order_book = exchange.fetch_order_book(exchange_symbol, limit=25)
+                        else:
+                            # Try uppercase version
+                            exchange_symbol_upper = exchange_symbol.upper()
+                            if exchange_symbol_upper in exchange.markets:
+                                order_book = exchange.fetch_order_book(exchange_symbol_upper, limit=25)
+                            else:
+                                # Fallback: try direct call
+                                order_book = exchange.fetch_order_book(exchange_symbol, limit=25)
+                    except Exception as load_error:
+                        error_str = str(load_error)
+                        # Check if it's a geographic restriction
+                        if "U.S." in error_str or "400302" in error_str or "restricted" in error_str.lower():
+                            logger.warning(f"KuCoin blocked due to geographic restriction (Render server IP). Skipping KuCoin.")
+                            continue  # Skip KuCoin, continue with other exchanges
+                        logger.warning(f"KuCoin market load failed, trying direct: {load_error}")
+                        try:
+                            order_book = exchange.fetch_order_book(exchange_symbol, limit=25)
+                        except Exception as direct_error:
+                            error_str = str(direct_error)
+                            if "U.S." in error_str or "400302" in error_str or "restricted" in error_str.lower():
+                                logger.warning(f"KuCoin blocked due to geographic restriction. Skipping.")
+                                continue
+                            raise
                 elif exchange_name == 'gateio':
-                    # Gate.io: slash format, needs 'type': 'spot' param
-                    order_book = exchange.fetch_order_book(exchange_symbol, limit=25, params={'type': 'spot'})
+                    # Gate.io: slash format, needs 'type': 'spot' param, may need markets loaded
+                    try:
+                        if not hasattr(exchange, 'markets') or not exchange.markets:
+                            exchange.load_markets()
+                        # Try to find symbol in markets
+                        if exchange_symbol in exchange.markets:
+                            order_book = exchange.fetch_order_book(exchange_symbol, limit=25, params={'type': 'spot'})
+                        else:
+                            # Fallback: try direct call
+                            order_book = exchange.fetch_order_book(exchange_symbol, limit=25, params={'type': 'spot'})
+                    except Exception as load_error:
+                        logger.warning(f"Gate.io market load failed, trying direct: {load_error}")
+                        order_book = exchange.fetch_order_book(exchange_symbol, limit=25, params={'type': 'spot'})
                 else:  # mexc and others
                     order_book = exchange.fetch_order_book(exchange_symbol, params={'type': 'spot'})
                 bids = order_book.get('bids', [])
