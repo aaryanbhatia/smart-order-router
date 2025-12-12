@@ -161,6 +161,29 @@ class SmartOrderRouter:
                                 amount=float(quantity),
                                 price=float(price)
                             )
+                    elif exchange_name == 'gateio':
+                        # Gate.io: needs 'type': 'spot' param, may need markets loaded
+                        try:
+                            if not hasattr(exchange, 'markets') or not exchange.markets:
+                                exchange.load_markets()
+                        except:
+                            pass  # Continue even if market load fails
+                        
+                        if order_type == OrderType.MARKET:
+                            order = exchange.create_market_order(
+                                symbol=spot_symbol,
+                                side=side.value,
+                                amount=float(quantity),
+                                params={'type': 'spot'}
+                            )
+                        else:
+                            order = exchange.create_limit_order(
+                                symbol=spot_symbol,
+                                side=side.value,
+                                amount=float(quantity),
+                                price=float(price),
+                                params={'type': 'spot'}
+                            )
                     else:
                         # Other exchanges use 'type': 'spot' param
                         if order_type == OrderType.MARKET:
@@ -179,17 +202,36 @@ class SmartOrderRouter:
                                 params={'type': 'spot'}  # Ensure spot trading only
                             )
                     
+                    # Safely handle None values from order response
+                    filled = order.get('filled')
+                    if filled is None:
+                        filled = quantity
+                    else:
+                        filled = Decimal(str(filled))
+                    
+                    avg_price = order.get('average')
+                    if avg_price is None:
+                        avg_price = price or Decimal("0")
+                    else:
+                        avg_price = Decimal(str(avg_price))
+                    
+                    cost = order.get('cost')
+                    if cost is None:
+                        cost = filled * avg_price if avg_price > 0 else Decimal("0")
+                    else:
+                        cost = Decimal(str(cost))
+                    
                     return ExecutionResult(
                         success=True,
-                        order_id=order['id'],
-                        total_filled=order.get('filled', quantity),
-                        average_price=order.get('average', price or Decimal("50000.0")),
-                        total_cost=order.get('cost', quantity * (price or Decimal("50000.0"))),
+                        order_id=order.get('id', 'unknown'),
+                        total_filled=filled,
+                        average_price=avg_price if avg_price > 0 else None,
+                        total_cost=cost,
                         executions=[{
                             "venue": exchange_name,
-                            "venue_order_id": order['id'],
+                            "venue_order_id": order.get('id', 'unknown'),
                             "quantity": float(quantity),
-                            "price": float(price or Decimal("50000.0")),
+                            "price": float(price or avg_price) if price or avg_price else 0.0,
                             "status": order.get('status', 'filled')
                         }]
                     )
@@ -202,6 +244,11 @@ class SmartOrderRouter:
             logger.error("All exchanges failed to place order")
             return ExecutionResult(
                 success=False,
+                order_id="failed",
+                total_filled=Decimal("0"),
+                average_price=None,
+                total_cost=Decimal("0"),
+                executions=[],
                 error_message="All exchanges failed to place order"
             )
             
@@ -209,6 +256,11 @@ class SmartOrderRouter:
             logger.error(f"Failed to place order: {e}")
             return ExecutionResult(
                 success=False,
+                order_id="failed",
+                total_filled=Decimal("0"),
+                average_price=None,
+                total_cost=Decimal("0"),
+                executions=[],
                 error_message=str(e)
             )
     
@@ -219,6 +271,13 @@ class SmartOrderRouter:
                 return None
                 
             exchange = self.exchanges[exchange_name]
+            
+            # Load markets first (especially important for Gate.io)
+            try:
+                if not hasattr(exchange, 'markets') or not exchange.markets:
+                    exchange.load_markets()
+            except Exception as load_error:
+                logger.warning(f"Failed to load markets for {exchange_name}: {load_error}")
             
             # Convert symbol format based on exchange requirements
             if '/' not in symbol:
@@ -291,7 +350,37 @@ class SmartOrderRouter:
             # Get prices from all exchanges
             for exchange_name, exchange in self.exchanges.items():
                 try:
-                    ticker = exchange.fetch_ticker(symbol)
+                    # Load markets first (especially important for Gate.io)
+                    try:
+                        if not hasattr(exchange, 'markets') or not exchange.markets:
+                            exchange.load_markets()
+                    except Exception as load_error:
+                        logger.warning(f"Failed to load markets for {exchange_name}: {load_error}")
+                    
+                    # Convert symbol format for this exchange
+                    exchange_symbol = symbol
+                    if '/' not in symbol:
+                        if exchange_name == 'gateio':
+                            if symbol.endswith('USDT'):
+                                exchange_symbol = symbol.replace("USDT", "/USDT")
+                            elif symbol.endswith('BTC'):
+                                exchange_symbol = symbol.replace("BTC", "/BTC")
+                            elif symbol.endswith('ETH'):
+                                exchange_symbol = symbol.replace("ETH", "/ETH")
+                        elif exchange_name == 'kucoin':
+                            if symbol.endswith('USDT'):
+                                exchange_symbol = symbol.replace("USDT", "-USDT")
+                            elif symbol.endswith('BTC'):
+                                exchange_symbol = symbol.replace("BTC", "-BTC")
+                            elif symbol.endswith('ETH'):
+                                exchange_symbol = symbol.replace("ETH", "-ETH")
+                    else:
+                        if exchange_name == 'kucoin':
+                            exchange_symbol = symbol.replace("/", "-")
+                        elif exchange_name in ['mexc', 'bitget']:
+                            exchange_symbol = symbol.replace("/", "")
+                    
+                    ticker = exchange.fetch_ticker(exchange_symbol)
                     bid = ticker.get('bid', 0)
                     ask = ticker.get('ask', float('inf'))
                     

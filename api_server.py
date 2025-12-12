@@ -251,6 +251,11 @@ async def create_order(
         )
         
         # Store order in database
+        # Handle None values safely
+        total_filled = float(result.total_filled) if result.total_filled is not None else 0.0
+        average_price = float(result.average_price) if result.average_price is not None else None
+        total_cost = float(result.total_cost) if result.total_cost is not None else 0.0
+        
         order_data = {
             "id": str(result.order_id),
             "symbol": order_request.symbol,
@@ -259,9 +264,9 @@ async def create_order(
             "quantity": float(quantity),
             "price": float(price) if price else None,
             "status": "filled" if result.success else "failed",
-            "total_filled": float(result.total_filled),
-            "average_price": float(result.average_price) if result.average_price else None,
-            "total_cost": float(result.total_cost) if result.total_cost else 0,
+            "total_filled": total_filled,
+            "average_price": average_price,
+            "total_cost": total_cost,
             "max_slippage": float(max_slippage) if max_slippage else None,
             "user_id": order_request.user_id,
             "created_at": datetime.utcnow()
@@ -300,6 +305,11 @@ async def create_order(
         
         db.commit()
         
+        # Handle None values safely for response
+        total_filled = float(result.total_filled) if result.total_filled is not None else 0.0
+        average_price = float(result.average_price) if result.average_price is not None else None
+        total_cost = float(result.total_cost) if result.total_cost is not None else 0.0
+        
         return OrderResponse(
             order_id=str(result.order_id),
             symbol=order_request.symbol,
@@ -308,11 +318,11 @@ async def create_order(
             quantity=float(quantity),
             price=float(price) if price else None,
             status="filled" if result.success else "failed",
-            total_filled=float(result.total_filled),
-            average_price=float(result.average_price) if result.average_price else None,
-            total_cost=float(result.total_cost) if result.total_cost else 0,
+            total_filled=total_filled,
+            average_price=average_price,
+            total_cost=total_cost,
             created_at=datetime.utcnow(),
-            executions=result.executions
+            executions=result.executions or []
         )
         
     except Exception as e:
