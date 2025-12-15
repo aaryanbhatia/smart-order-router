@@ -556,7 +556,7 @@ async def get_prices(symbol: str):
                             logger.warning(f"Gate.io market load failed, trying direct: {load_error}")
                             order_book = exchange.fetch_order_book(exchange_symbol, limit=5, params={'type': 'spot'})
                     else:  # mexc and others
-                    order_book = exchange.fetch_order_book(exchange_symbol, params={'type': 'spot'})
+                        order_book = exchange.fetch_order_book(exchange_symbol, params={'type': 'spot'})
                     bids = order_book.get('bids', [])
                     asks = order_book.get('asks', [])
                     
@@ -694,7 +694,7 @@ async def get_order_book_depth(symbol: str, bps: int = 20):
                         logger.warning(f"Gate.io market load failed, trying direct: {load_error}")
                         order_book = exchange.fetch_order_book(exchange_symbol, limit=25, params={'type': 'spot'})
                 else:  # mexc and others
-                order_book = exchange.fetch_order_book(exchange_symbol, params={'type': 'spot'})
+                    order_book = exchange.fetch_order_book(exchange_symbol, params={'type': 'spot'})
                 bids = order_book.get('bids', [])
                 asks = order_book.get('asks', [])
                 
