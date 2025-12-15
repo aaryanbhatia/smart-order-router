@@ -498,17 +498,6 @@ async def get_prices(symbol: str):
                             exchange_symbol = symbol.replace("ETH", "/ETH")
                         else:
                             exchange_symbol = symbol
-                    elif exchange_name == 'kucoin':
-                        if "/" in symbol:
-                            exchange_symbol = symbol.replace("/", "-")
-                        elif symbol.endswith("USDT"):
-                            exchange_symbol = symbol.replace("USDT", "-USDT")
-                        elif symbol.endswith("BTC"):
-                            exchange_symbol = symbol.replace("BTC", "-BTC")
-                        elif symbol.endswith("ETH"):
-                            exchange_symbol = symbol.replace("ETH", "-ETH")
-                    else:
-                            exchange_symbol = symbol
                     elif exchange_name == 'bitget':
                         exchange_symbol = symbol.replace("/", "") if "/" in symbol else symbol
                     else:  # mexc and others
