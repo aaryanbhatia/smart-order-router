@@ -66,20 +66,21 @@ class SmartOrderRouter:
                 self.exchanges['bitget'] = ccxt.bitget(bitget_params)
                 logger.info(f"Bitget exchange initialized with API key: {bitget_config.api_key[:8] if bitget_config.api_key else 'None'}...")
             
-            # KuCoin
-            if hasattr(config, 'exchanges') and 'kucoin' in config.exchanges:
-                kucoin_config = config.exchanges['kucoin']
-                # Only include password if passphrase is provided (for authenticated calls)
-                kucoin_params = {
-                    'apiKey': kucoin_config.api_key or '',
-                    'secret': kucoin_config.secret or '',
-                    'sandbox': kucoin_config.sandbox,
-                    'enableRateLimit': True,
-                }
-                if kucoin_config.passphrase:
-                    kucoin_params['password'] = kucoin_config.passphrase  # CCXT uses 'password' for passphrase
-                self.exchanges['kucoin'] = ccxt.kucoin(kucoin_params)
-                logger.info(f"KuCoin exchange initialized with API key: {kucoin_config.api_key[:8] if kucoin_config.api_key else 'None'}...")
+            # KuCoin - DISABLED due to IP restrictions (US IP blocking)
+            # if hasattr(config, 'exchanges') and 'kucoin' in config.exchanges:
+            #     kucoin_config = config.exchanges['kucoin']
+            #     # Only include password if passphrase is provided (for authenticated calls)
+            #     kucoin_params = {
+            #         'apiKey': kucoin_config.api_key or '',
+            #         'secret': kucoin_config.secret or '',
+            #         'sandbox': kucoin_config.sandbox,
+            #         'enableRateLimit': True,
+            #     }
+            #     if kucoin_config.passphrase:
+            #         kucoin_params['password'] = kucoin_config.passphrase  # CCXT uses 'password' for passphrase
+            #     self.exchanges['kucoin'] = ccxt.kucoin(kucoin_params)
+            #     logger.info(f"KuCoin exchange initialized with API key: {kucoin_config.api_key[:8] if kucoin_config.api_key else 'None'}...")
+            logger.info("KuCoin exchange disabled due to IP restrictions")
                 
         except Exception as e:
             logger.warning(f"Failed to initialize exchanges: {e}")
@@ -116,6 +117,9 @@ class SmartOrderRouter:
             
             # Try to place order on available exchanges
             for exchange_name, exchange in self.exchanges.items():
+                # Skip KuCoin due to IP restrictions
+                if exchange_name == 'kucoin':
+                    continue
                 try:
                     # Convert symbol format for spot trading
                     if exchange_name == 'gateio':
@@ -427,6 +431,9 @@ class SmartOrderRouter:
             
             # Get prices from all exchanges
             for exchange_name, exchange in self.exchanges.items():
+                # Skip KuCoin due to IP restrictions
+                if exchange_name == 'kucoin':
+                    continue
                 try:
                     ticker = exchange.fetch_ticker(symbol)
                     prices[exchange_name] = {
