@@ -257,55 +257,55 @@ async def create_order(
         total_cost = float(result.total_cost) if result.total_cost is not None else 0.0
         
         try:
-        order_data = {
-            "id": str(result.order_id),
-            "symbol": order_request.symbol,
-            "side": order_request.side,
-            "order_type": order_request.order_type,
-            "quantity": float(quantity),
-            "price": float(price) if price else None,
-            "status": "filled" if result.success else "failed",
+            order_data = {
+                "id": str(result.order_id),
+                "symbol": order_request.symbol,
+                "side": order_request.side,
+                "order_type": order_request.order_type,
+                "quantity": float(quantity),
+                "price": float(price) if price else None,
+                "status": "filled" if result.success else "failed",
                 "total_filled": total_filled,
                 "average_price": average_price,
                 "total_cost": total_cost,
-            "max_slippage": float(max_slippage) if max_slippage else None,
-            "user_id": order_request.user_id,
-            "created_at": datetime.utcnow()
-        }
-        
-            # Insert order (gracefully handle missing table)
-            try:
-        db.execute(text("""
-            INSERT INTO orders (id, symbol, side, order_type, quantity, price, status, 
-                              total_filled, average_price, total_cost, max_slippage, user_id, created_at)
-            VALUES (:id, :symbol, :side, :order_type, :quantity, :price, :status,
-                    :total_filled, :average_price, :total_cost, :max_slippage, :user_id, :created_at)
-        """), order_data)
-        
-        # Store executions
-        for execution in result.executions:
-            exec_data = {
-                "order_id": str(result.order_id),
-                "venue": execution.get("venue", ""),
-                "venue_order_id": execution.get("venue_order_id", ""),
-                "quantity": float(execution.get("quantity", 0)),
-                "price": float(execution.get("price", 0)),
-                "filled_quantity": float(execution.get("filled_quantity", 0)),
-                "average_price": float(execution.get("average_price", 0)) if execution.get("average_price") else None,
-                "status": execution.get("status", "pending"),
-                "execution_time_ms": execution.get("execution_time_ms", 0),
-                "slippage_bps": float(execution.get("slippage_bps", 0)) if execution.get("slippage_bps") else None,
+                "max_slippage": float(max_slippage) if max_slippage else None,
+                "user_id": order_request.user_id,
                 "created_at": datetime.utcnow()
             }
             
-            db.execute(text("""
-                INSERT INTO order_executions (order_id, venue, venue_order_id, quantity, price,
-                                            filled_quantity, average_price, status, execution_time_ms, slippage_bps, created_at)
-                VALUES (:order_id, :venue, :venue_order_id, :quantity, :price,
-                        :filled_quantity, :average_price, :status, :execution_time_ms, :slippage_bps, :created_at)
-            """), exec_data)
-        
-        db.commit()
+            # Insert order (gracefully handle missing table)
+            try:
+                db.execute(text("""
+                    INSERT INTO orders (id, symbol, side, order_type, quantity, price, status, 
+                                      total_filled, average_price, total_cost, max_slippage, user_id, created_at)
+                    VALUES (:id, :symbol, :side, :order_type, :quantity, :price, :status,
+                            :total_filled, :average_price, :total_cost, :max_slippage, :user_id, :created_at)
+                """), order_data)
+                
+                # Store executions
+                for execution in result.executions:
+                    exec_data = {
+                        "order_id": str(result.order_id),
+                        "venue": execution.get("venue", ""),
+                        "venue_order_id": execution.get("venue_order_id", ""),
+                        "quantity": float(execution.get("quantity", 0)),
+                        "price": float(execution.get("price", 0)),
+                        "filled_quantity": float(execution.get("filled_quantity", 0)),
+                        "average_price": float(execution.get("average_price", 0)) if execution.get("average_price") else None,
+                        "status": execution.get("status", "pending"),
+                        "execution_time_ms": execution.get("execution_time_ms", 0),
+                        "slippage_bps": float(execution.get("slippage_bps", 0)) if execution.get("slippage_bps") else None,
+                        "created_at": datetime.utcnow()
+                    }
+                    
+                    db.execute(text("""
+                        INSERT INTO order_executions (order_id, venue, venue_order_id, quantity, price,
+                                                    filled_quantity, average_price, status, execution_time_ms, slippage_bps, created_at)
+                        VALUES (:order_id, :venue, :venue_order_id, :quantity, :price,
+                                :filled_quantity, :average_price, :status, :execution_time_ms, :slippage_bps, :created_at)
+                    """), exec_data)
+                
+                db.commit()
             except SQLAlchemyError as db_error:
                 # Database table doesn't exist or other DB error - log but don't fail
                 logger.warning(f"Failed to save order to database (table may not exist): {db_error}")
