@@ -134,27 +134,29 @@ def place_marketable_limit(venue, symbol, side, qty, guard_px, cross_bps=THROUGH
         order_data = {
             "symbol": symbol,
             "side": side,
-            "order_type": "limit",
+            "order_type": "market",  # Changed to market order for immediate execution
             "quantity": qty,
-            "price": px,
+            "price": None,  # Market orders don't need price, but some APIs accept it as max price
             "venue": venue  # Include venue in order request
         }
         
         result = call_api("/orders", method="POST", data=order_data)
         if result:
-            # Handle None values safely - use default if average_price is None
-            avg_price = result.get("average_price")
-            if avg_price is None:
-                avg_price = px
-            else:
-                avg_price = float(avg_price)
-            
-            # Handle None values for total_filled
+            # Handle None values safely
+            # Only use default price if order was actually filled
             total_filled = result.get("total_filled")
             if total_filled is None:
-                total_filled = qty
+                total_filled = 0.0
             else:
                 total_filled = float(total_filled)
+            
+            # Only show average_price if order was actually filled
+            avg_price = result.get("average_price")
+            if avg_price is None or total_filled == 0:
+                # If nothing was filled, don't show a fake average price
+                avg_price = None
+            else:
+                avg_price = float(avg_price)
             
             return result, avg_price, total_filled
         else:
@@ -332,24 +334,30 @@ if st.session_state.rows:
 
             try:
                 order, avg, filled = place_marketable_limit(venue, sym, side, qty, guard)
-                # Safe comparison: ensure avg and guard are not None before comparing
-                if avg is None:
-                    avg = 0.0
-                if guard is None:
-                    guard = 0.0
                 # Ensure filled is not None
                 if filled is None:
                     filled = 0.0
                 
-                slip = ((avg-guard)/guard*10000) if (avg>0 and guard>0 and side=="buy") else ((guard-avg)/guard*10000 if (avg>0 and guard>0) else 0.0)
+                # Only calculate slippage if order was actually filled
+                if filled > 0 and avg is not None and guard is not None and guard > 0:
+                    if side == "buy":
+                        slip = ((avg - guard) / guard) * 10000
+                    else:
+                        slip = ((guard - avg) / guard) * 10000
+                else:
+                    # No fill, no slippage
+                    slip = 0.0
+                    # If nothing filled, don't show fake average price
+                    if filled == 0:
+                        avg = None
                 results.append({
                     "Venue": venue.upper(), 
                     "Symbol": sym,
                     "Placed Qty": qty, 
                     "Guard TOB": guard,
-                    "Avg Fill": avg, 
+                    "Avg Fill": avg if avg is not None else 0.0,  # Show 0.0 if not filled
                     "Filled Qty": filled, 
-                    "Slippage (bps)": round(slip,2)
+                    "Slippage (bps)": round(slip, 2) if filled > 0 else 0.0  # Only show slippage if filled
                 })
             except Exception as e:
                 results.append({"Venue": venue.upper(), "Symbol": sym, "Error": str(e)})
