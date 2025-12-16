@@ -37,6 +37,9 @@ class SmartOrderRouter:
                     'secret': gateio_config.secret or '',
                     'sandbox': gateio_config.sandbox,
                     'enableRateLimit': True,
+                    'options': {
+                        'createMarketBuyOrderRequiresPrice': False  # Allow market buy orders without price
+                    }
                 })
                 logger.info(f"Gate.io exchange initialized with API key: {gateio_config.api_key[:8] if gateio_config.api_key else 'None'}...")
             
@@ -199,13 +202,52 @@ class SmartOrderRouter:
                             order = None
                             last_error = None
                             
-                            # Try slash format first (CCXT standard: A47/USDT)
+                            # For Gate.io market buy orders, we need to pass cost (USDT amount) instead of quantity
+                            # Since we set createMarketBuyOrderRequiresPrice=False, we can pass cost as amount
+                            # For buy orders: amount = cost in quote currency (USDT)
+                            # For sell orders: amount = quantity in base currency (A47)
+                            
+                            order_params = {'type': 'spot', 'account': 'spot'}
+                            market_price = None
+                            
+                            if side == OrderSide.BUY:
+                                # For market buy orders, Gate.io needs the cost (USDT amount) not the quantity
+                                # Get current market price to calculate cost
+                                try:
+                                    ticker = exchange.fetch_ticker(spot_symbol)
+                                    market_price = ticker.get('last') or ticker.get('ask') or ticker.get('bid')
+                                    if market_price and market_price > 0:
+                                        # Calculate cost: quantity * price
+                                        cost = float(quantity) * float(market_price)
+                                        # For buy orders with createMarketBuyOrderRequiresPrice=False, pass cost as amount
+                                        order_amount = cost
+                                        logger.info(f"Gate.io market buy: quantity={quantity}, price={market_price}, cost={cost}")
+                                        # Also include price in params (Gate.io API v4 may want it even with the option set)
+                                        order_params['price'] = str(market_price)
+                                    else:
+                                        # Fallback: estimate cost (use a high price to ensure execution)
+                                        estimated_price = 999999.0  # Very high price to ensure market order executes
+                                        cost = float(quantity) * estimated_price
+                                        order_amount = cost
+                                        order_params['price'] = '0'  # Gate.io accepts 0 for market orders
+                                        logger.warning(f"Gate.io: Could not get price for {spot_symbol}, using estimated cost={cost}")
+                                except Exception as price_error:
+                                    # Fallback: estimate cost with very high price
+                                    estimated_price = 999999.0
+                                    cost = float(quantity) * estimated_price
+                                    order_amount = cost
+                                    order_params['price'] = '0'  # Gate.io accepts 0 for market orders
+                                    logger.warning(f"Gate.io: Could not get price for {spot_symbol}: {price_error}, using estimated cost={cost}")
+                            else:
+                                # For sell orders, use quantity directly
+                                order_amount = float(quantity)
+                            
                             try:
                                 order = exchange.create_market_order(
                                     symbol=spot_symbol,
                                     side=side.value,
-                                    amount=float(quantity),
-                                    params={'type': 'spot', 'account': 'spot'}
+                                    amount=order_amount,
+                                    params=order_params
                                 )
                             except Exception as market_order_error:
                                 error_str = str(market_order_error).lower()
@@ -219,8 +261,8 @@ class SmartOrderRouter:
                                         order = exchange.create_market_order(
                                             symbol=underscore_symbol,
                                             side=side.value,
-                                            amount=float(quantity),
-                                            params={'type': 'spot', 'account': 'spot'}
+                                            amount=order_amount,  # Use the same calculated amount
+                                            params=order_params
                                         )
                                         spot_symbol = underscore_symbol  # Update to the working symbol
                                         logger.info(f"Successfully used underscore format: {underscore_symbol}")
