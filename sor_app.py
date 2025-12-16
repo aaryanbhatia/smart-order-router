@@ -142,7 +142,21 @@ def place_marketable_limit(venue, symbol, side, qty, guard_px, cross_bps=THROUGH
         
         result = call_api("/orders", method="POST", data=order_data)
         if result:
-            return result, result.get("average_price", px), result.get("total_filled", qty)
+            # Handle None values safely - use default if average_price is None
+            avg_price = result.get("average_price")
+            if avg_price is None:
+                avg_price = px
+            else:
+                avg_price = float(avg_price)
+            
+            # Handle None values for total_filled
+            total_filled = result.get("total_filled")
+            if total_filled is None:
+                total_filled = qty
+            else:
+                total_filled = float(total_filled)
+            
+            return result, avg_price, total_filled
         else:
             raise Exception("Failed to place order")
     except Exception as e:
@@ -318,6 +332,15 @@ if st.session_state.rows:
 
             try:
                 order, avg, filled = place_marketable_limit(venue, sym, side, qty, guard)
+                # Safe comparison: ensure avg and guard are not None before comparing
+                if avg is None:
+                    avg = 0.0
+                if guard is None:
+                    guard = 0.0
+                # Ensure filled is not None
+                if filled is None:
+                    filled = 0.0
+                
                 slip = ((avg-guard)/guard*10000) if (avg>0 and guard>0 and side=="buy") else ((guard-avg)/guard*10000 if (avg>0 and guard>0) else 0.0)
                 results.append({
                     "Venue": venue.upper(), 
