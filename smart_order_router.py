@@ -188,7 +188,7 @@ class SmartOrderRouter:
                             logger.warning(f"Gate.io market load warning: {load_error}")
                             # Continue - might still work
                         
-                        # Validate symbol exists in markets
+                        # Validate symbol exists in markets BEFORE placing order
                         if hasattr(exchange, 'markets') and exchange.markets:
                             if spot_symbol not in exchange.markets:
                                 # Try to find the symbol in markets (case-insensitive)
@@ -200,7 +200,9 @@ class SmartOrderRouter:
                                         logger.info(f"Gate.io: Found symbol {spot_symbol} in markets")
                                         break
                                 if not symbol_found:
-                                    raise ValueError(f"Gate.io: Symbol {spot_symbol} not found in markets")
+                                    # Check if it's a trading pair issue
+                                    available_symbols = [s for s in exchange.markets.keys() if 'USDT' in s.upper()][:10]
+                                    raise ValueError(f"Gate.io: Symbol {spot_symbol} not found in markets. Available symbols include: {available_symbols}")
                         
                         # Gate.io requires specific order format
                         if order_type == OrderType.MARKET:
@@ -277,15 +279,36 @@ class SmartOrderRouter:
                                     if updated_status in ['rejected', 'cancelled', 'expired']:
                                         raise ValueError(f"Gate.io market order {order_id} was {updated_status} - order did not execute")
                                     
-                                    # If still 0 filled and status is not 'open' or 'pending', it likely failed
-                                    if filled_qty == 0 and updated_status not in ['open', 'pending', 'new']:
+                                    # For market orders, if still 0 filled, it failed (market orders should fill immediately)
+                                    if filled_qty == 0:
                                         # Check for error messages in the order response
                                         error_info = updated_order.get('info', {})
+                                        error_msg = None
                                         if isinstance(error_info, dict):
-                                            error_msg = error_info.get('label') or error_info.get('message') or ''
-                                            if error_msg:
-                                                raise ValueError(f"Gate.io order failed: {error_msg}")
-                                        raise ValueError(f"Gate.io market order {order_id} has status {updated_status} but filled=0 - order may have failed")
+                                            error_msg = error_info.get('label') or error_info.get('message') or error_info.get('text') or ''
+                                        
+                                        # Also check the order response itself for error fields
+                                        if not error_msg:
+                                            error_msg = updated_order.get('message') or updated_order.get('error') or updated_order.get('label') or ''
+                                        
+                                        # If status is 'open' or 'pending' for a market order, that's unusual - market orders should fill immediately
+                                        if updated_status in ['open', 'pending', 'new']:
+                                            # Wait a bit longer and check again
+                                            await asyncio.sleep(0.5)
+                                            final_check = exchange.fetch_order(order_id, spot_symbol)
+                                            if final_check:
+                                                final_filled = final_check.get('filled') or final_check.get('filledSize') or 0
+                                                if float(final_filled or 0) == 0:
+                                                    raise ValueError(f"Gate.io market order {order_id} is still {updated_status} with filled=0 after waiting. Market orders should fill immediately. Symbol may not exist or order may be rejected.")
+                                        
+                                        if error_msg:
+                                            raise ValueError(f"Gate.io order failed: {error_msg}")
+                                        
+                                        # If status is 'closed' but filled is 0, order was likely cancelled/rejected
+                                        if updated_status == 'closed':
+                                            raise ValueError(f"Gate.io market order {order_id} was closed but filled=0 - order was likely cancelled or rejected. Check Gate.io dashboard.")
+                                        
+                                        raise ValueError(f"Gate.io market order {order_id} has status {updated_status} but filled=0. Market orders should fill immediately. Symbol: {spot_symbol}, Quantity: {quantity}")
                             except ValueError:
                                 raise  # Re-raise ValueError (order rejected/failed)
                             except Exception as fetch_err:
