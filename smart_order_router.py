@@ -241,8 +241,16 @@ class SmartOrderRouter:
                         # Additional validation: check if order has required fields
                         if order_type == OrderType.LIMIT:
                             # For limit orders, price should be set
-                            if not order.get('price') or float(order.get('price', 0)) <= 0:
-                                logger.warning(f"Gate.io limit order missing or invalid price: {order.get('price')}")
+                            order_price = order.get('price')
+                            if order_price is None:
+                                logger.warning(f"Gate.io limit order missing price field")
+                            else:
+                                try:
+                                    price_val = float(order_price)
+                                    if price_val <= 0:
+                                        logger.warning(f"Gate.io limit order has invalid price: {price_val}")
+                                except (ValueError, TypeError) as e:
+                                    logger.warning(f"Gate.io limit order price conversion failed: {e}")
                                 # Don't fail here, but log the warning
                     else:
                         # Other exchanges use 'type': 'spot' param
@@ -275,27 +283,47 @@ class SmartOrderRouter:
                     
                     avg_price = order.get('average')
                     if avg_price is None:
-                        avg_price = price or Decimal("0")
+                        # Use provided price, or default to 0
+                        avg_price = price if price is not None else Decimal("0")
                     else:
                         avg_price = Decimal(str(avg_price))
                     
+                    # Ensure avg_price is never None for comparisons
+                    if avg_price is None:
+                        avg_price = Decimal("0")
+                    
                     cost = order.get('cost')
                     if cost is None:
-                        cost = filled * avg_price if avg_price > 0 else Decimal("0")
+                        # Safe comparison: avg_price is guaranteed to be Decimal
+                        cost = filled * avg_price if avg_price and avg_price > 0 else Decimal("0")
                     else:
                         cost = Decimal(str(cost))
+                    
+                    # Ensure cost is never None
+                    if cost is None:
+                        cost = Decimal("0")
+                    
+                    # Safe comparison: avg_price is guaranteed to be Decimal, not None
+                    final_avg_price = avg_price if avg_price and avg_price > 0 else None
+                    
+                    # Safe price handling for execution record
+                    exec_price = 0.0
+                    if price is not None:
+                        exec_price = float(price)
+                    elif avg_price and avg_price > 0:
+                        exec_price = float(avg_price)
                     
                     return ExecutionResult(
                         success=True,
                         order_id=order.get('id', 'unknown'),
                         total_filled=filled,
-                        average_price=avg_price if avg_price > 0 else None,
+                        average_price=final_avg_price,
                         total_cost=cost,
                         executions=[{
                             "venue": exchange_name,
                             "venue_order_id": order.get('id', 'unknown'),
                             "quantity": float(quantity),
-                            "price": float(price or avg_price) if price or avg_price else 0.0,
+                            "price": exec_price,
                             "status": order.get('status', 'filled')
                         }]
                     )
