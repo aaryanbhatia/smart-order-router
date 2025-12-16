@@ -109,14 +109,28 @@ class SmartOrderRouter:
         quantity: Decimal,
         price: Decimal = None,
         max_slippage: Decimal = None,
-        user_id: str = None
+        user_id: str = None,
+        venue: str = None
     ) -> ExecutionResult:
         """Place a smart order"""
         try:
             logger.info(f"Placing order: {side} {quantity} {symbol} at {price or 'market'}")
             
+            # If venue is specified, only try that exchange
+            exchanges_to_try = {}
+            if venue:
+                venue_lower = venue.lower()
+                if venue_lower in self.exchanges:
+                    exchanges_to_try[venue_lower] = self.exchanges[venue_lower]
+                    logger.info(f"Using specified venue: {venue_lower}")
+                else:
+                    logger.warning(f"Specified venue '{venue}' not found, trying all exchanges")
+                    exchanges_to_try = self.exchanges
+            else:
+                exchanges_to_try = self.exchanges
+            
             # Try to place order on available exchanges
-            for exchange_name, exchange in self.exchanges.items():
+            for exchange_name, exchange in exchanges_to_try.items():
                 # Skip KuCoin due to IP restrictions
                 if exchange_name == 'kucoin':
                     continue
@@ -170,8 +184,23 @@ class SmartOrderRouter:
                         try:
                             if not hasattr(exchange, 'markets') or not exchange.markets:
                                 exchange.load_markets()
-                        except:
-                            pass  # Continue even if market load fails
+                        except Exception as load_error:
+                            logger.warning(f"Gate.io market load warning: {load_error}")
+                            # Continue - might still work
+                        
+                        # Validate symbol exists in markets
+                        if hasattr(exchange, 'markets') and exchange.markets:
+                            if spot_symbol not in exchange.markets:
+                                # Try to find the symbol in markets (case-insensitive)
+                                symbol_found = False
+                                for market_symbol in exchange.markets:
+                                    if market_symbol.upper() == spot_symbol.upper():
+                                        spot_symbol = market_symbol
+                                        symbol_found = True
+                                        logger.info(f"Gate.io: Found symbol {spot_symbol} in markets")
+                                        break
+                                if not symbol_found:
+                                    raise ValueError(f"Gate.io: Symbol {spot_symbol} not found in markets")
                         
                         # Gate.io requires specific order format
                         if order_type == OrderType.MARKET:
@@ -190,6 +219,31 @@ class SmartOrderRouter:
                                 price=float(price),
                                 params={'type': 'spot', 'account': 'spot'}
                             )
+                        
+                        # Validate order response for Gate.io
+                        if not order:
+                            raise ValueError("Gate.io returned empty order response")
+                        
+                        order_id = order.get('id')
+                        if not order_id or order_id == 'unknown':
+                            raise ValueError(f"Gate.io returned invalid order ID: {order_id}")
+                        
+                        # Log order details for debugging
+                        logger.info(f"Gate.io order created: ID={order_id}, Status={order.get('status')}, Symbol={spot_symbol}")
+                        
+                        # Verify order was actually placed by checking status
+                        order_status = order.get('status', '').lower()
+                        if order_status in ['closed', 'cancelled', 'expired', 'rejected']:
+                            error_msg = f"Gate.io order {order_id} has status {order_status}, order was not placed successfully"
+                            logger.error(error_msg)
+                            raise ValueError(error_msg)
+                        
+                        # Additional validation: check if order has required fields
+                        if order_type == OrderType.LIMIT:
+                            # For limit orders, price should be set
+                            if not order.get('price') or float(order.get('price', 0)) <= 0:
+                                logger.warning(f"Gate.io limit order missing or invalid price: {order.get('price')}")
+                                # Don't fail here, but log the warning
                     else:
                         # Other exchanges use 'type': 'spot' param
                         if order_type == OrderType.MARKET:
@@ -211,7 +265,11 @@ class SmartOrderRouter:
                     # Safely handle None values from order response
                     filled = order.get('filled')
                     if filled is None:
-                        filled = quantity
+                        # For limit orders, filled might be 0 initially (order is pending)
+                        if order_type == OrderType.LIMIT:
+                            filled = Decimal("0")  # Limit orders start unfilled until executed
+                        else:
+                            filled = quantity  # Market orders should be filled immediately
                     else:
                         filled = Decimal(str(filled))
                     
@@ -243,7 +301,16 @@ class SmartOrderRouter:
                     )
                     
                 except Exception as e:
-                    logger.warning(f"Failed to place order on {exchange_name}: {e}")
+                    error_msg = str(e)
+                    logger.error(f"Failed to place order on {exchange_name}: {error_msg}")
+                    # Log full exception for debugging
+                    import traceback
+                    logger.debug(f"Full traceback for {exchange_name}: {traceback.format_exc()}")
+                    
+                    # For Gate.io, log more details
+                    if exchange_name == 'gateio':
+                        logger.error(f"Gate.io order placement failed. Symbol: {spot_symbol}, Side: {side.value}, "
+                                   f"Type: {order_type.value}, Quantity: {quantity}, Price: {price}")
                     continue
             
             # If all exchanges fail, return failure

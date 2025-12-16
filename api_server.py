@@ -102,6 +102,7 @@ class OrderRequest(BaseModel):
     price: Optional[float] = Field(None, gt=0, description="Limit price for limit orders")
     max_slippage: Optional[float] = Field(None, ge=0, le=1, description="Maximum slippage (0-1)")
     user_id: Optional[str] = Field(None, description="User identifier")
+    venue: Optional[str] = Field(None, description="Specific exchange to use (e.g., 'gateio', 'bitget', 'mexc')")
 
 class OrderResponse(BaseModel):
     order_id: str
@@ -239,7 +240,7 @@ async def create_order(
         side = OrderSide.BUY if order_request.side.lower() == "buy" else OrderSide.SELL
         order_type = OrderType.MARKET if order_request.order_type.lower() == "market" else OrderType.LIMIT
         
-        # Place order
+        # Place order - if venue is specified, only try that exchange
         result = await sor.place_order(
             symbol=order_request.symbol,
             side=side,
@@ -247,7 +248,8 @@ async def create_order(
             quantity=quantity,
             price=price,
             max_slippage=max_slippage,
-            user_id=order_request.user_id
+            user_id=order_request.user_id,
+            venue=order_request.venue  # Pass venue if specified
         )
         
         # Store order in database (optional - don't fail if table doesn't exist)

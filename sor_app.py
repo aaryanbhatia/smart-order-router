@@ -136,7 +136,8 @@ def place_marketable_limit(venue, symbol, side, qty, guard_px, cross_bps=THROUGH
             "side": side,
             "order_type": "limit",
             "quantity": qty,
-            "price": px
+            "price": px,
+            "venue": venue  # Include venue in order request
         }
         
         result = call_api("/orders", method="POST", data=order_data)
