@@ -181,31 +181,25 @@ class SmartOrderRouter:
                             )
                     elif exchange_name == 'gateio':
                         # Gate.io: needs 'type': 'spot' param, may need markets loaded
+                        # Force reload markets to ensure we have latest symbol list
                         try:
-                            if not hasattr(exchange, 'markets') or not exchange.markets:
-                                exchange.load_markets()
+                            exchange.load_markets(reload=True)
+                            logger.info(f"Gate.io markets loaded: {len(exchange.markets)} markets available")
                         except Exception as load_error:
                             logger.warning(f"Gate.io market load warning: {load_error}")
-                            # Continue - might still work
+                            # Try to continue - markets might already be loaded
                         
-                        # Validate symbol exists in markets BEFORE placing order
-                        if hasattr(exchange, 'markets') and exchange.markets:
-                            if spot_symbol not in exchange.markets:
-                                # Try to find the symbol in markets (case-insensitive)
-                                symbol_found = False
-                                for market_symbol in exchange.markets:
-                                    if market_symbol.upper() == spot_symbol.upper():
-                                        spot_symbol = market_symbol
-                                        symbol_found = True
-                                        logger.info(f"Gate.io: Found symbol {spot_symbol} in markets")
-                                        break
-                                if not symbol_found:
-                                    # Check if it's a trading pair issue
-                                    available_symbols = [s for s in exchange.markets.keys() if 'USDT' in s.upper()][:10]
-                                    raise ValueError(f"Gate.io: Symbol {spot_symbol} not found in markets. Available symbols include: {available_symbols}")
+                        # CCXT uses slash format (A47/USDT) internally, even though Gate.io website shows underscore (A47_USDT)
+                        # CCXT handles the conversion automatically
+                        # Let CCXT try the order - it will give us the actual error if symbol doesn't exist
                         
                         # Gate.io requires specific order format
+                        # Try slash format first (CCXT standard), then underscore format (Gate.io native) as fallback
                         if order_type == OrderType.MARKET:
+                            order = None
+                            last_error = None
+                            
+                            # Try slash format first (CCXT standard: A47/USDT)
                             try:
                                 order = exchange.create_market_order(
                                     symbol=spot_symbol,
@@ -215,15 +209,37 @@ class SmartOrderRouter:
                                 )
                             except Exception as market_order_error:
                                 error_str = str(market_order_error).lower()
-                                # Check for common Gate.io errors
-                                if 'insufficient' in error_str or 'balance' in error_str:
-                                    raise ValueError(f"Insufficient balance on Gate.io for {spot_symbol}")
-                                elif 'symbol' in error_str or 'market' in error_str or 'not found' in error_str:
-                                    raise ValueError(f"Symbol {spot_symbol} not found or not available on Gate.io")
-                                elif 'minimum' in error_str or 'size' in error_str:
-                                    raise ValueError(f"Order size {quantity} below minimum for {spot_symbol} on Gate.io")
+                                last_error = market_order_error
+                                
+                                # If it's a symbol error, try underscore format (Gate.io native: A47_USDT)
+                                if 'symbol' in error_str or 'market' in error_str or 'not found' in error_str or 'invalid' in error_str:
+                                    underscore_symbol = spot_symbol.replace("/", "_")
+                                    logger.info(f"Trying Gate.io underscore format: {underscore_symbol}")
+                                    try:
+                                        order = exchange.create_market_order(
+                                            symbol=underscore_symbol,
+                                            side=side.value,
+                                            amount=float(quantity),
+                                            params={'type': 'spot', 'account': 'spot'}
+                                        )
+                                        spot_symbol = underscore_symbol  # Update to the working symbol
+                                        logger.info(f"Successfully used underscore format: {underscore_symbol}")
+                                    except Exception as underscore_error:
+                                        # Both formats failed - show helpful error
+                                        error_msg = str(market_order_error)
+                                        raise ValueError(f"Gate.io symbol error for {spot_symbol} (tried both A47/USDT and A47_USDT): {error_msg}")
                                 else:
-                                    raise ValueError(f"Gate.io market order failed: {market_order_error}")
+                                    # Not a symbol error, re-raise with helpful message
+                                    error_msg = str(market_order_error)
+                                    if 'insufficient' in error_str or 'balance' in error_str:
+                                        raise ValueError(f"Insufficient balance on Gate.io for {spot_symbol}")
+                                    elif 'minimum' in error_str or 'size' in error_str:
+                                        raise ValueError(f"Order size {quantity} below minimum for {spot_symbol} on Gate.io")
+                                    else:
+                                        raise ValueError(f"Gate.io market order failed: {error_msg}")
+                            
+                            if order is None:
+                                raise ValueError(f"Failed to create Gate.io market order for {spot_symbol}")
                         else:
                             # Gate.io limit orders need account parameter
                             order = exchange.create_limit_order(
@@ -418,6 +434,10 @@ class SmartOrderRouter:
                     # Safe comparison: avg_price is guaranteed to be Decimal, not None
                     final_avg_price = avg_price if avg_price and avg_price > 0 else None
                     
+                    # For market orders, if nothing was filled, it's a failure
+                    if order_type == OrderType.MARKET and filled == 0:
+                        raise ValueError(f"Market order on {exchange_name} for {spot_symbol} was placed but not filled. Order ID: {order.get('id')}, Status: {order_status}")
+                    
                     # Safe price handling for execution record
                     exec_price = 0.0
                     if price is not None:
@@ -425,8 +445,11 @@ class SmartOrderRouter:
                     elif avg_price and avg_price > 0:
                         exec_price = float(avg_price)
                     
+                    # Determine success based on whether order was actually filled
+                    order_success = filled > 0
+                    
                     return ExecutionResult(
-                        success=True,
+                        success=order_success,
                         order_id=order.get('id', 'unknown'),
                         total_filled=filled,
                         average_price=final_avg_price,
@@ -436,7 +459,7 @@ class SmartOrderRouter:
                             "venue_order_id": order.get('id', 'unknown'),
                             "quantity": float(quantity),
                             "price": exec_price,
-                            "status": order.get('status', 'filled')
+                            "status": order.get('status', 'filled' if order_success else 'failed')
                         }]
                     )
                     
