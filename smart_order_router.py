@@ -204,12 +204,24 @@ class SmartOrderRouter:
                         
                         # Gate.io requires specific order format
                         if order_type == OrderType.MARKET:
-                            order = exchange.create_market_order(
-                                symbol=spot_symbol,
-                                side=side.value,
-                                amount=float(quantity),
-                                params={'type': 'spot', 'account': 'spot'}
-                            )
+                            try:
+                                order = exchange.create_market_order(
+                                    symbol=spot_symbol,
+                                    side=side.value,
+                                    amount=float(quantity),
+                                    params={'type': 'spot', 'account': 'spot'}
+                                )
+                            except Exception as market_order_error:
+                                error_str = str(market_order_error).lower()
+                                # Check for common Gate.io errors
+                                if 'insufficient' in error_str or 'balance' in error_str:
+                                    raise ValueError(f"Insufficient balance on Gate.io for {spot_symbol}")
+                                elif 'symbol' in error_str or 'market' in error_str or 'not found' in error_str:
+                                    raise ValueError(f"Symbol {spot_symbol} not found or not available on Gate.io")
+                                elif 'minimum' in error_str or 'size' in error_str:
+                                    raise ValueError(f"Order size {quantity} below minimum for {spot_symbol} on Gate.io")
+                                else:
+                                    raise ValueError(f"Gate.io market order failed: {market_order_error}")
                         else:
                             # Gate.io limit orders need account parameter
                             order = exchange.create_limit_order(
@@ -229,14 +241,58 @@ class SmartOrderRouter:
                             raise ValueError(f"Gate.io returned invalid order ID: {order_id}")
                         
                         # Log order details for debugging
-                        logger.info(f"Gate.io order created: ID={order_id}, Status={order.get('status')}, Symbol={spot_symbol}")
+                        order_status = order.get('status', '').lower()
+                        logger.info(f"Gate.io order created: ID={order_id}, Status={order_status}, Symbol={spot_symbol}, "
+                                  f"Filled={order.get('filled')}, Amount={order.get('amount')}")
                         
                         # Verify order was actually placed by checking status
-                        order_status = order.get('status', '').lower()
                         if order_status in ['closed', 'cancelled', 'expired', 'rejected']:
                             error_msg = f"Gate.io order {order_id} has status {order_status}, order was not placed successfully"
                             logger.error(error_msg)
                             raise ValueError(error_msg)
+                        
+                        # For market orders, immediately fetch order status to get accurate fill information
+                        # Gate.io often returns order immediately but fill info comes later
+                        if order_type == OrderType.MARKET:
+                            filled_qty = order.get('filled') or order.get('filledSize') or order.get('filled_amount') or 0
+                            
+                            # Always fetch order status for market orders to get accurate fill info
+                            try:
+                                import asyncio
+                                await asyncio.sleep(0.3)  # Small delay for order to process
+                                updated_order = exchange.fetch_order(order_id, spot_symbol)
+                                if updated_order:
+                                    updated_status = updated_order.get('status', '').lower()
+                                    updated_filled = updated_order.get('filled') or updated_order.get('filledSize') or updated_order.get('filled_amount') or 0
+                                    
+                                    logger.info(f"Gate.io market order {order_id} fetched: Status={updated_status}, "
+                                              f"Filled={updated_filled}, OriginalFilled={filled_qty}")
+                                    
+                                    # Use updated order data
+                                    order = updated_order
+                                    order_status = updated_status
+                                    filled_qty = float(updated_filled) if updated_filled else 0
+                                    
+                                    # Check if order was rejected
+                                    if updated_status in ['rejected', 'cancelled', 'expired']:
+                                        raise ValueError(f"Gate.io market order {order_id} was {updated_status} - order did not execute")
+                                    
+                                    # If still 0 filled and status is not 'open' or 'pending', it likely failed
+                                    if filled_qty == 0 and updated_status not in ['open', 'pending', 'new']:
+                                        # Check for error messages in the order response
+                                        error_info = updated_order.get('info', {})
+                                        if isinstance(error_info, dict):
+                                            error_msg = error_info.get('label') or error_info.get('message') or ''
+                                            if error_msg:
+                                                raise ValueError(f"Gate.io order failed: {error_msg}")
+                                        raise ValueError(f"Gate.io market order {order_id} has status {updated_status} but filled=0 - order may have failed")
+                            except ValueError:
+                                raise  # Re-raise ValueError (order rejected/failed)
+                            except Exception as fetch_err:
+                                logger.warning(f"Could not fetch Gate.io order {order_id} status: {fetch_err}")
+                                # If original order shows 0 filled and status suggests failure, raise error
+                                if filled_qty == 0 and order_status not in ['open', 'pending', 'new']:
+                                    raise ValueError(f"Gate.io market order {order_id} appears to have failed (status: {order_status}, filled: 0). Could not verify: {fetch_err}")
                         
                         # Additional validation: check if order has required fields
                         if order_type == OrderType.LIMIT:
@@ -271,13 +327,46 @@ class SmartOrderRouter:
                             )
                     
                     # Safely handle None values from order response
-                    filled = order.get('filled')
+                    filled = order.get('filled') or order.get('filledSize') or order.get('filled_amount')
+                    order_status = order.get('status', '').lower()
+                    
+                    # For Gate.io market orders, fetch order status to get accurate fill information
+                    # Gate.io might not return filled quantity in initial response
+                    if exchange_name == 'gateio' and order_type == OrderType.MARKET:
+                        order_id = order.get('id')
+                        if order_id and (filled is None or float(filled or 0) == 0):
+                            try:
+                                # Small delay to allow order to process
+                                import asyncio
+                                await asyncio.sleep(0.5)
+                                # Fetch the order to get actual fill information
+                                updated_order = exchange.fetch_order(order_id, spot_symbol)
+                                if updated_order:
+                                    logger.info(f"Gate.io market order {order_id} status: {updated_order.get('status')}, "
+                                              f"filled={updated_order.get('filled')}")
+                                    # Use updated order data
+                                    order = updated_order
+                                    filled = updated_order.get('filled') or updated_order.get('filledSize') or updated_order.get('filled_amount')
+                                    order_status = updated_order.get('status', '').lower()
+                            except Exception as fetch_error:
+                                logger.warning(f"Failed to fetch Gate.io order {order_id} status: {fetch_error}")
+                                # Continue with original order data
+                    
+                    # Convert filled to Decimal
                     if filled is None:
-                        # For limit orders, filled might be 0 initially (order is pending)
+                        # Check order status to determine if filled
                         if order_type == OrderType.LIMIT:
                             filled = Decimal("0")  # Limit orders start unfilled until executed
-                        else:
-                            filled = quantity  # Market orders should be filled immediately
+                        elif order_type == OrderType.MARKET:
+                            # For market orders, check status
+                            if order_status in ['closed', 'filled', 'done']:
+                                # Status says filled, but no filled quantity - use quantity as fallback
+                                filled = quantity
+                                logger.warning(f"Market order status is {order_status} but filled is None, assuming full fill")
+                            else:
+                                # Order might be pending or failed
+                                filled = Decimal("0")
+                                logger.warning(f"Market order has status {order_status} and filled is None")
                     else:
                         filled = Decimal(str(filled))
                     
